@@ -1,0 +1,28 @@
+---
+# Private Ingress — Hub VNet の VM (オンプレ想定) からアクセス
+#
+# use-private-ip: "true" により AppGW の Private Frontend にリスナーを作成
+# waf-policy-for-path により Private 専用の WAF Policy を適用
+#
+# ※ WAF_POLICY_PRIVATE_ID は apply 時に terraform output から注入する (README 参照)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echoserver-private-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/use-private-ip: "true"
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "WAF_POLICY_PRIVATE_ID"
+spec:
+  rules:
+    - host: private.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: echoserver-svc
+                port:
+                  number: 80

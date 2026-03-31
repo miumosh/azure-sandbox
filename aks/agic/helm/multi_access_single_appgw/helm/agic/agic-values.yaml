@@ -1,0 +1,29 @@
+# AGIC — 単一 AppGW で Private / Public 両 Ingress を管理
+#
+# usePrivateIP: false (デフォルト Public)
+# Private Ingress は個別の annotation で private frontend を指定する
+#
+# helm install agic \
+#   oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#   --version 1.9.1 \
+#   --namespace kube-system \
+#   --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+#   --set armAuth.identityClientID=$(terraform output -raw agic_identity_client_id) \
+#   -f ../helm/agic/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set で上書き
+  resourceGroup: "single-appgw-rg"
+  name: "single-appgw"
+  usePrivateIP: false  # デフォルトは Public。Private は Ingress annotation で指定。
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  watchNamespace: ""

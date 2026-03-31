@@ -1,0 +1,12 @@
+# Azure Subscription ID
+subscription_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # az account show --query id -o tsv
+
+# Azure Region
+location = "japaneast"
+
+# 自分のグローバル IP (SSH + Public AppGW テスト許可対象)
+my_public_ip = "x.x.x.x/32" # curl ifconfig.me
+
+# Test VM 認証情報 (検証用ハードコード — 本番環境では使用しないこと)
+vm_admin_username = "azureuser"
+vm_admin_password = "CHANGE_ME"

@@ -1,0 +1,31 @@
+# AGIC Public — インターネットからのパブリックアクセス用
+#
+# helm install agic-public \
+#   oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#   --version 1.9.1 \
+#   --namespace kube-system \
+#   --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+#   --set armAuth.identityClientID=$(terraform output -raw agic_public_identity_client_id) \
+#   -f ../helm/agic-public/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set で上書き
+  resourceGroup: "multi-appgw-rg"
+  name: "multi-appgw-public"
+  usePrivateIP: false
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  ingressClass: azure/application-gateway-public
+  # IngressClass リソース "azure-application-gateway" は agic-private 側で作成済み。
+  # 2つ目の AGIC をインストールすると同名リソースが競合するため、こちらでは無効化する。
+  ingressClassResource:
+    enabled: false
+  watchNamespace: ""

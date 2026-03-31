@@ -1,0 +1,25 @@
+---
+# Ingress for Public AppGW
+# インターネット (ローカル PC) からアクセスされる
+# host: public.example.com (DNS 未設定の場合は -H "Host:" ヘッダーで指定)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echoserver-public-ingress
+  namespace: default
+  annotations:
+    # agic-public が監視する値。agic-private (azure/application-gateway-private) とは別の AGIC インスタンスが処理する。
+    # ※ IngressClass リソースとは無関係。詳細は helm/ingress/README.md を参照。
+    kubernetes.io/ingress.class: azure/application-gateway-public
+spec:
+  rules:
+    - host: public.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: echoserver-svc
+                port:
+                  number: 80

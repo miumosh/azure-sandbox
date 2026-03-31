@@ -1,0 +1,31 @@
+# AGIC Private — Hub VNet (オンプレ想定) からのプライベートアクセス用
+#
+# helm install agic-private \
+#   oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#   --version 1.9.1 \
+#   --namespace kube-system \
+#   --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+#   --set armAuth.identityClientID=$(terraform output -raw agic_private_identity_client_id) \
+#   -f ../helm/agic-private/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set で上書き
+  resourceGroup: "multi-appgw-rg"
+  name: "multi-appgw-private"
+  usePrivateIP: true
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  ingressClass: azure/application-gateway-private
+  # IngressClass リソース "azure-application-gateway" はこのリリース (agic-private) が作成・管理する。
+  # agic-public 側では ingressClassResource.enabled: false で無効化している。
+  # ※ 各 AGIC Pod が監視する Ingress は上記 ingressClass の値で決まるため、
+  #   IngressClass リソースの有無は実際のルーティングに影響しない。
+  watchNamespace: ""

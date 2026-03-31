@@ -1,0 +1,30 @@
+# AGIC Helm values — CNI Overlay + Private IP ルーティング
+#
+# appgw.subscriptionId と armAuth.identityClientID は
+# helm install 時に --set で渡すことを推奨（terraform output から取得）
+#
+# インストールコマンド (README.md 参照):
+#   helm install agic \
+#     oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#     --version 1.9.1 \
+#     --namespace kube-system \
+#     --set appgw.subscriptionId=$(terraform -chdir=terraform output -raw subscription_id) \
+#     --set armAuth.identityClientID=$(terraform -chdir=terraform output -raw agic_identity_client_id) \
+#     -f helm/agic/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set appgw.subscriptionId=<value> で上書き
+  resourceGroup: "agic-green-rg"
+  name: "agic-green-appgw"
+  usePrivateIP: true
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set armAuth.identityClientID=<value> で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  watchNamespace: "" # 全 namespace を監視

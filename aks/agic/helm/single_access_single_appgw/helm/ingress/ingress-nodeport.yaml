@@ -1,0 +1,24 @@
+---
+# Ingress for NodePort app
+# host: nodeport-setting.internal
+# AppGW routes to Node IP:NodePort via kube-proxy DNAT
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-nodeport-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/use-private-ip: "true"
+spec:
+  rules:
+    - host: nodeport-setting.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-nodeport-svc
+                port:
+                  number: 80

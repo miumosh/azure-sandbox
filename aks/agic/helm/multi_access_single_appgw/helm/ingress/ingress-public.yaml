@@ -1,0 +1,27 @@
+---
+# Public Ingress — インターネット (ローカル PC) からアクセス
+#
+# use-private-ip アノテーションなし → Public Frontend にリスナーを作成
+# waf-policy-for-path により Public 専用の WAF Policy を適用
+#
+# ※ WAF_POLICY_PUBLIC_ID は apply 時に terraform output から注入する (README 参照)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echoserver-public-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "WAF_POLICY_PUBLIC_ID"
+spec:
+  rules:
+    - host: public.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: echoserver-svc
+                port:
+                  number: 80

@@ -1,0 +1,24 @@
+---
+# Ingress for ClusterIP app
+# host: clusterip-setting.internal
+# AppGW routes to Pod IP directly via Route Table (AGIC v1.9.1+ required)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-clusterip-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/use-private-ip: "true"
+spec:
+  rules:
+    - host: clusterip-setting.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-clusterip-svc
+                port:
+                  number: 80

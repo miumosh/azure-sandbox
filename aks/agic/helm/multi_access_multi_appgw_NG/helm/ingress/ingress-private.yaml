@@ -1,0 +1,26 @@
+---
+# Ingress for Private AppGW
+# Hub VNet の VM (オンプレ想定) からアクセスされる
+# host: private.internal
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echoserver-private-ingress
+  namespace: default
+  annotations:
+    # agic-private が監視する値。agic-public (azure/application-gateway-public) とは別の AGIC インスタンスが処理する。
+    # ※ IngressClass リソースとは無関係。詳細は helm/ingress/README.md を参照。
+    kubernetes.io/ingress.class: azure/application-gateway-private
+    appgw.ingress.kubernetes.io/use-private-ip: "true"
+spec:
+  rules:
+    - host: private.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: echoserver-svc
+                port:
+                  number: 80

@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light" style=""><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AKS + AGIC Helm Greenfield — CNI Overlay / Private 接続 検証概要</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&amp;family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet">
+    <style>
+      body {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 48px;
+        box-sizing: border-box;
+        font-family: 'Noto Sans JP', 'Roboto', sans-serif;
+        color: #333333;
+        line-height: 1.6;
+        background-color: #ffffff;
+      }
+      h1,
+      h2,
+      h3,
+      h4,
+      p {
+        margin-top: 0;
+      }
+      h2 {
+        color: #1a237e;
+        border-bottom: 2px solid #e0e0e0;
+        padding-bottom: 8px;
+        margin-top: 40px;
+        margin-bottom: 20px;
+        font-size: 1.4rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h3 {
+        color: #0d47a1;
+        font-size: 1.1rem;
+        margin-top: 24px;
+        margin-bottom: 12px;
+      }
+      .header-block {
+        background: linear-gradient(135deg, #1a237e, #0d47a1);
+        color: white;
+        padding: 32px;
+        border-radius: 8px;
+        margin-bottom: 32px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+      .header-block h1 {
+        font-size: 1.8rem;
+        margin-bottom: 12px;
+        line-height: 1.3;
+        color: #fff;
+      }
+      .subtitle-badge {
+        display: inline-block;
+        background-color: rgba(255, 255, 255, 0.2);
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        margin-bottom: 16px;
+      }
+      .header-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        font-size: 0.85rem;
+      }
+      .tag-badge {
+        background-color: #e3f2fd;
+        color: #01579b;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-weight: bold;
+        border: 1px solid #b3e5fc;
+      }
+      .grid-2col {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .grid-item {
+        flex: 1 1 calc(50% - 16px);
+        min-width: 280px;
+        box-sizing: border-box;
+      }
+      .grid-3col {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .grid-item-3 {
+        flex: 1 1 calc(33.333% - 16px);
+        min-width: 200px;
+        box-sizing: border-box;
+      }
+      .card {
+        background-color: #f8f9fa;
+        border: 1px solid #eeeeee;
+        border-radius: 8px;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .card-title {
+        font-weight: bold;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .callout {
+        padding: 16px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        border-left: 6px solid;
+      }
+      .callout-warning {
+        background-color: #fff3e0;
+        border-color: #ef6c00;
+        color: #e65100;
+      }
+      .callout-danger {
+        background-color: #ffebee;
+        border-color: #c62828;
+        color: #b71c1c;
+      }
+      .callout-info {
+        background-color: #e3f2fd;
+        border-color: #0277bd;
+        color: #01579b;
+      }
+      .callout-dashed {
+        border: 2px dashed #0277bd;
+        background-color: #f1f8e9;
+        color: #33691e;
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 24px;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border: 1px solid #e0e0e0;
+        padding: 10px 12px;
+        text-align: left;
+      }
+      th {
+        background-color: #f5f5f5;
+        font-weight: bold;
+        color: #424242;
+      }
+      tr:nth-child(even) {
+        background-color: #fafafa;
+      }
+      .checklist-ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .checklist-ul li {
+        margin-bottom: 8px;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: bold;
+        margin-right: 6px;
+      }
+      .bg-auth {
+        background-color: #ce93d8;
+        color: #4a148c;
+      }
+      .bg-perm {
+        background-color: #ffcc80;
+        color: #e65100;
+      }
+      .bg-boot {
+        background-color: #f48fb1;
+        color: #880e4f;
+      }
+      .bg-conf {
+        background-color: #90caf9;
+        color: #01579b;
+      }
+      a {
+        color: #1565c0;
+        text-decoration: none;
+      }
+      .link-list {
+        list-style: none;
+        padding: 0;
+      }
+      .link-list li {
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+        padding-left: 20px;
+        position: relative;
+      }
+      .link-list li::before {
+        content: '🔗';
+        position: absolute;
+        left: 0;
+        top: 2px;
+        font-size: 0.8rem;
+      }
+      .footer {
+        margin-top: 48px;
+        padding-top: 16px;
+        border-top: 1px solid #eeeeee;
+        font-size: 0.85rem;
+        color: #757575;
+        text-align: center;
+      }
+
+      /* ── Architecture Diagram ── */
+      .arch-vnet {
+        border: 2.5px dashed #5c6bc0;
+        border-radius: 12px;
+        padding: 20px;
+        background: linear-gradient(160deg, #f8f9ff 0%, #eef1ff 100%);
+        margin-bottom: 16px;
+      }
+      .arch-vnet-title {
+        font-weight: bold;
+        color: #3949ab;
+        font-size: 1rem;
+        margin-bottom: 16px;
+        padding: 6px 14px;
+        background: #e8eaf6;
+        border-radius: 6px;
+        display: inline-block;
+        border: 1px solid #c5cae9;
+      }
+      .arch-subnet {
+        border-radius: 8px;
+        padding: 14px;
+        margin-bottom: 8px;
+        border: 1.5px solid;
+      }
+      .arch-subnet-appgw {
+        background: #fff8e1;
+        border-color: #ffca28;
+      }
+      .arch-subnet-aks {
+        background: #e3f2fd;
+        border-color: #42a5f5;
+      }
+      .arch-subnet-vm {
+        background: #f3e5f5;
+        border-color: #ab47bc;
+      }
+      .arch-subnet-label {
+        font-size: 0.78rem;
+        font-weight: bold;
+        color: #37474f;
+        margin-bottom: 10px;
+        padding: 3px 10px;
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 4px;
+        display: inline-block;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+      }
+      .arch-resource-box {
+        background: white;
+        border-radius: 8px;
+        padding: 12px 16px;
+        border: 1px solid #e0e0e0;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        flex-wrap: wrap;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      .arch-resource-icon {
+        font-size: 1.6rem;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+      .arch-resource-body {
+        flex: 1;
+      }
+      .arch-resource-title {
+        font-weight: bold;
+        font-size: 0.95rem;
+        margin-bottom: 4px;
+      }
+      .arch-badge {
+        display: inline-block;
+        padding: 2px 9px;
+        border-radius: 10px;
+        font-size: 0.76rem;
+        margin: 2px 3px 2px 0;
+        border: 1px solid;
+      }
+      .arch-badge-blue {
+        background: #e3f2fd;
+        color: #0d47a1;
+        border-color: #90caf9;
+      }
+      .arch-badge-green {
+        background: #e8f5e9;
+        color: #1b5e20;
+        border-color: #a5d6a7;
+      }
+      .arch-badge-orange {
+        background: #fff3e0;
+        color: #e65100;
+        border-color: #ffcc80;
+      }
+      .arch-badge-purple {
+        background: #f3e5f5;
+        color: #6a1b9a;
+        border-color: #ce93d8;
+      }
+      .arch-badge-gray {
+        background: #eceff1;
+        color: #37474f;
+        border-color: #b0bec5;
+      }
+      .arch-flow-connector {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 6px 0 4px 0;
+        gap: 3px;
+      }
+      .arch-flow-arrow-sym {
+        font-size: 1.5rem;
+        color: #5c6bc0;
+        line-height: 1;
+        font-weight: bold;
+      }
+      .arch-flow-label {
+        font-size: 0.78rem;
+        color: #546e7a;
+        background: white;
+        padding: 2px 10px;
+        border-radius: 10px;
+        border: 1px solid #b0bec5;
+        text-align: center;
+      }
+      .arch-node-box {
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px dashed #64b5f6;
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 6px;
+      }
+      .arch-node-header {
+        font-weight: bold;
+        color: #0277bd;
+        margin-bottom: 10px;
+        font-size: 0.9rem;
+      }
+      .arch-pods-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .arch-pod {
+        flex: 1;
+        min-width: 150px;
+        border-radius: 8px;
+        padding: 10px;
+        border: 1.5px solid;
+        font-size: 0.85rem;
+        text-align: center;
+        background: white;
+      }
+      .arch-pod-agic {
+        border-color: #9c27b0;
+        background: #f8e8ff;
+      }
+      .arch-pod-nodeport {
+        border-color: #1976d2;
+        background: #e3f2fd;
+      }
+      .arch-pod-clusterip {
+        border-color: #388e3c;
+        background: #e8f5e9;
+      }
+      .arch-pod-name {
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      .arch-pod-sub {
+        font-size: 0.75rem;
+        color: #757575;
+        margin-bottom: 4px;
+      }
+      .arch-pod-note {
+        margin-top: 6px;
+        font-size: 0.75rem;
+        color: #37474f;
+        border-top: 1px dashed #bdbdbd;
+        padding-top: 5px;
+        line-height: 1.4;
+      }
+      .arch-external {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .arch-ext-item {
+        flex: 1;
+        min-width: 200px;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 0.85rem;
+        border: 1.5px solid;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      .arch-ext-entraid {
+        background: #ede7f6;
+        border-color: #7e57c2;
+      }
+      .arch-ext-mcrg {
+        background: #e8f5e9;
+        border-color: #43a047;
+      }
+      .arch-ext-deploy {
+        background: #fff8e1;
+        border-color: #ffa000;
+      }
+      .arch-ext-title {
+        font-weight: bold;
+        margin-bottom: 8px;
+      }
+      .arch-ext-item ul {
+        margin: 0 0 6px 0;
+        padding-left: 18px;
+      }
+      .arch-ext-item li {
+        margin-bottom: 3px;
+      }
+      .arch-ext-note {
+        font-size: 0.76rem;
+        color: #424242;
+        background: rgba(255, 255, 255, 0.75);
+        padding: 4px 8px;
+        border-radius: 4px;
+        margin-top: 8px;
+        border: 1px dashed rgba(0, 0, 0, 0.15);
+      }
+
+      /* ── OIDC Why Table ── */
+      .oidc-table-wrapper {
+        margin-bottom: 20px;
+        overflow-x: auto;
+      }
+      .oidc-why-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1.5px solid #e0e0e0;
+        font-size: 0.88rem;
+      }
+      .oidc-why-table thead tr th {
+        background: #37474f;
+        color: white;
+        padding: 10px 14px;
+        text-align: left;
+      }
+      .oidc-why-table tbody tr td {
+        padding: 10px 14px;
+        border-top: 1px solid #e0e0e0;
+        vertical-align: top;
+      }
+      .oidc-why-table tbody tr:nth-child(even) td {
+        background: #fafafa;
+      }
+      .oidc-why-table tbody tr.row-highlight td {
+        background: #f3e5f5 !important;
+        border-left: 3px solid #9c27b0;
+      }
+      .oidc-why-table tbody tr.row-highlight td:first-child {
+        font-weight: bold;
+        color: #6a1b9a;
+      }
+
+      /* ── Vertical Auth Flow ── */
+      .vflow-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        margin-bottom: 20px;
+      }
+      .vflow-phase-banner {
+        padding: 7px 14px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        letter-spacing: 0.04em;
+        margin: 10px 0 8px 0;
+      }
+      .vflow-phase-setup {
+        background: #e8eaf6;
+        color: #3949ab;
+      }
+      .vflow-phase-runtime {
+        background: #e8f5e9;
+        color: #1b5e20;
+      }
+      .vflow-phase-azure {
+        background: #e3f2fd;
+        color: #01579b;
+      }
+      .vflow-phase-result {
+        background: #e0f2f1;
+        color: #004d40;
+      }
+      .vflow-step-box {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 12px 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      }
+      .vflow-step-box.step-setup {
+        border-left: 4px solid #5c6bc0;
+      }
+      .vflow-step-box.step-runtime {
+        border-left: 4px solid #43a047;
+      }
+      .vflow-step-box.step-azure {
+        border-left: 4px solid #0277bd;
+      }
+      .vflow-step-box.step-final {
+        border-left: 4px solid #00796b;
+        background: #e0f7fa;
+      }
+      .vflow-step-num {
+        flex-shrink: 0;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.8rem;
+        color: white;
+        margin-top: 1px;
+      }
+      .num-indigo {
+        background: #5c6bc0;
+      }
+      .num-green {
+        background: #43a047;
+      }
+      .num-blue {
+        background: #0277bd;
+      }
+      .num-teal {
+        background: #00796b;
+      }
+      .vflow-step-content {
+        flex: 1;
+        font-size: 0.88rem;
+      }
+      .vflow-step-title {
+        font-weight: bold;
+        margin-bottom: 3px;
+      }
+      .vflow-step-detail {
+        font-size: 0.8rem;
+        color: #546e7a;
+        line-height: 1.5;
+      }
+      .vflow-step-code {
+        display: inline-block;
+        background: #f5f5f5;
+        border: 1px solid #e0e0e0;
+        border-radius: 3px;
+        padding: 0px 5px;
+        font-family: monospace;
+        font-size: 0.78rem;
+        color: #37474f;
+        margin: 1px 2px;
+      }
+      .vflow-arrow-line {
+        width: 2px;
+        height: 18px;
+        background: #90a4ae;
+        margin: 3px 0 3px 12px;
+      }
+      .rbac-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        font-size: 0.88rem;
+      }
+      .rbac-row-normal {
+        background: #e3f2fd;
+      }
+      .rbac-row-important {
+        background: #ffebee;
+        border: 1.5px solid #ef9a9a;
+      }
+      .rbac-tag {
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+      }
+      .rbac-tag-agic {
+        background: #7e57c2;
+        color: white;
+      }
+      .rbac-tag-akscp {
+        background: #1976d2;
+        color: white;
+      }
+      code {
+        background: #f5f5f5;
+        border: 1px solid #e0e0e0;
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body style="">
+    <!-- ヘッダー -->
+    <div class="header-block">
+      <div class="subtitle-badge">Helm グリーンフィールドデプロイ | CNI Overlay | Private 接続</div>
+      <h1>AKS + AGIC Helm Greenfield<br>CNI Overlay / Private 接続 検証概要</h1>
+      <div class="header-meta">
+        <span>📅 2026-03-25</span>
+        <span class="tag-badge">AKS Standard SKU</span>
+        <span class="tag-badge">AGIC v1.9.1+</span>
+        <span class="tag-badge">CNI Overlay</span>
+        <span class="tag-badge">Workload Identity</span>
+      </div>
+    </div>
+
+    <!-- 1. 目次 -->
+    <h2>📋 1. 目次</h2>
+    <ol style="line-height: 2">
+      <li><a href="#sec2">検証サマリー</a></li>
+      <li><a href="#sec3">構成概要・検証アーキテクチャ</a></li>
+      <li><a href="#sec4">制限事項</a></li>
+      <li><a href="#sec5">経路について — Ingress / Egress</a></li>
+      <li><a href="#sec6">Azure ネットワークモデル比較</a></li>
+      <li><a href="#sec7">ネットワークポリシー比較</a></li>
+      <li><a href="#sec8">権限構成</a></li>
+      <li><a href="#sec9">権限不足エラーパターン</a></li>
+      <li><a href="#sec10">実務チェックリスト</a></li>
+      <li><a href="#sec11">参考資料</a></li>
+    </ol>
+
+    <!-- 2. 検証サマリー -->
+    <h2 id="sec2">📊 2. 検証サマリー</h2>
+    <div class="grid-2col">
+      <div class="grid-item card">
+        <div class="card-title">✅ 検証構成</div>
+        <p>Helm Greenfield デプロイ<br><small>AKS・AppGW ともに新規作成し、Helm を用いて AGIC を導入</small></p>
+      </div>
+      <div class="grid-item card">
+        <div class="card-title">✅ ネットワーク</div>
+        <p>
+          CNI Overlay ＋ Private 接続<br><small>AppGW フロントエンドはプライベート IP、Pod は VNet 外 CIDR</small>
+        </p>
+      </div>
+      <div class="grid-item card">
+        <div class="card-title">✅ 認証方式</div>
+        <p>Workload Identity (OIDC)<br><small>非推奨の Pod Identity を排除し、K8s SA トークンによる連携</small></p>
+      </div>
+      <div class="grid-item card">
+        <div class="card-title">✅ 検証範囲</div>
+        <p>Ingress ルーティングのみ<br><small>Egress (外部への送信) や WAF 詳細設定は今回の検証範囲外</small></p>
+      </div>
+    </div>
+
+    <!-- 3. アーキテクチャ図 -->
+    <h2 id="sec3">🏗️ 3. 構成概要・検証アーキテクチャ</h2>
+
+    <div style="margin-bottom: 24px">
+      <!-- VNet コンテナ -->
+      <div class="arch-vnet">
+        <div class="arch-vnet-title">🏢 Azure Virtual Network: 10.0.0.0/16</div>
+
+        <!-- vm-subnet (一番上) -->
+        <div class="arch-subnet arch-subnet-vm">
+          <div class="arch-subnet-label">🟣 vm-subnet: 10.0.3.0/24</div>
+          <div class="arch-resource-box">
+            <div class="arch-resource-icon">💻</div>
+            <div class="arch-resource-body">
+              <div class="arch-resource-title">Private 接続確認用 VM</div>
+              <span class="arch-badge arch-badge-purple">IP: 10.0.3.x</span>
+              <span class="arch-badge arch-badge-green">✅ NodePort Pod 疎通確認 OK</span>
+              <span class="arch-badge arch-badge-green">✅ ClusterIP Pod 疎通確認 OK</span>
+              <div style="font-size: 0.8rem; color: #555; margin-top: 6px">
+                同一 VNet 内から AppGW Private IP (10.0.3.x → 10.0.1.10) へ直接 HTTP 接続し疎通テストを実施
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flow VM → AppGW (疎通確認コマンド) -->
+        <div class="arch-flow-connector">
+          <div style="
+              background: #fffde7;
+              border: 1.5px solid #f9a825;
+              border-radius: 8px;
+              padding: 10px 16px;
+              font-size: 0.82rem;
+              color: #37474f;
+              margin: 4px 0 4px 0;
+              line-height: 1.9;
+              width: 100%;
+              box-sizing: border-box;
+            ">
+            <strong>🖥️ 疎通確認コマンド (VM ログイン後に実行)</strong><br>
+            <code style="
+                display: block;
+                background: #fff8e1;
+                border: 1px solid #ffe082;
+                border-radius: 4px;
+                padding: 4px 10px;
+                margin: 4px 0;
+                font-size: 0.8rem;
+              ">curl http://10.0.1.10/ -H 'Host: nodeport-setting.internal'</code>
+            → AppGW → Node IP : NodePort → kube-proxy DNAT → <strong>Pod A (NodePort)</strong> &nbsp; ✅ 応答確認<br>
+            <code style="
+                display: block;
+                background: #fff8e1;
+                border: 1px solid #ffe082;
+                border-radius: 4px;
+                padding: 4px 10px;
+                margin: 4px 0;
+                font-size: 0.8rem;
+              ">curl http://10.0.1.10/ -H 'Host: clusterip-setting.internal'</code>
+            → AppGW → Pod IP 直接 (Route Table 経由) → <strong>Pod B (ClusterIP)</strong> &nbsp; ✅ 応答確認
+          </div>
+          <div class="arch-flow-arrow-sym" style="margin-top: 2px">⬇</div>
+          <div class="arch-flow-label">AppGW Private IP: 10.0.1.10 へのリクエスト</div>
+        </div>
+
+        <!-- appgw-subnet (中間) -->
+        <div class="arch-subnet arch-subnet-appgw">
+          <div class="arch-subnet-label">
+            🟡 appgw-subnet: 10.0.1.0/24 &nbsp;|&nbsp; Delegation: Microsoft.Network/applicationGateways
+          </div>
+          <div class="arch-resource-box">
+            <div class="arch-resource-icon">🌐</div>
+            <div class="arch-resource-body">
+              <div class="arch-resource-title">Application Gateway v2</div>
+              <span class="arch-badge arch-badge-orange">Private IP: 10.0.1.10</span>
+              <span class="arch-badge arch-badge-orange">SKU: Standard_v2</span>
+              <span class="arch-badge arch-badge-gray">Listener / Routing Rule / HTTP Settings</span>
+              <div style="font-size: 0.8rem; color: #795548; margin-top: 6px">
+                ← AGIC が MC_RG の Route Table をこのサブネットへ自動関連付け（Network Contributor 権限）
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flow AppGW ↔ AKS -->
+        <div class="arch-flow-connector">
+          <div class="arch-flow-arrow-sym">⬇</div>
+          <div class="arch-flow-label">⬇ NodePort 転送 または Pod IP 直接ルーティング (Route Table 経由)</div>
+        </div>
+
+        <!-- aks-subnet (一番下) -->
+        <div class="arch-subnet arch-subnet-aks">
+          <div class="arch-subnet-label">
+            🔵 aks-subnet: 10.0.2.0/24 &nbsp;|&nbsp; Pod CIDR (Overlay): 192.168.0.0/16 (VNet 外)
+          </div>
+          <div class="arch-node-box">
+            <div class="arch-node-header">
+              ⚙️ AKS Node &nbsp;<span style="font-weight: normal; font-size: 0.85rem">(Node IP: 10.0.2.x)</span>
+            </div>
+            <div class="arch-pods-row">
+              <div class="arch-pod arch-pod-agic">
+                <div class="arch-pod-name">🤖 AGIC Pod</div>
+                <div class="arch-pod-sub">Namespace: kube-system</div>
+                <div class="arch-pod-sub">SA: agic-sa-ingress-azure</div>
+                <div class="arch-pod-note">
+                  Azure ARM API 呼び出し<br>
+                  🔑 Workload Identity (OIDC) で認証<br>
+                  ↳ AppGW 設定変更 / Route Table 操作
+                </div>
+              </div>
+              <div class="arch-pod arch-pod-nodeport">
+                <div class="arch-pod-name">📦 アプリ Pod A</div>
+                <div class="arch-pod-sub">Service type: NodePort</div>
+                <div class="arch-pod-sub">Port: 30000–32767</div>
+                <div class="arch-pod-note">
+                  ✅ 疎通確認済み<br>
+                  Host: nodeport-setting.internal<br>
+                  AppGW → Node IP:NodePort → DNAT → Pod
+                </div>
+              </div>
+              <div class="arch-pod arch-pod-clusterip">
+                <div class="arch-pod-name">📦 アプリ Pod B</div>
+                <div class="arch-pod-sub">Service type: ClusterIP</div>
+                <div class="arch-pod-sub">Pod IP: 192.168.x.x</div>
+                <div class="arch-pod-note">
+                  ✅ 疎通確認済み<br>
+                  Host: clusterip-setting.internal<br>
+                  AppGW → Pod IP 直接 (Route Table 経由)
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- /arch-vnet -->
+
+      <!-- Azure 外部サービス -->
+      <div class="arch-external">
+        <div class="arch-ext-item arch-ext-entraid">
+          <div class="arch-ext-title">🔐 Microsoft Entra ID (Azure AD)</div>
+          <ul>
+            <li>AKS OIDC Issuer URL</li>
+            <li>Federated Identity Credential (issuer / subject)</li>
+            <li>AGIC User-Assigned Managed Identity (UAI)</li>
+          </ul>
+          <div class="arch-ext-note">
+            ⬆️ AGIC Pod が K8s SA JWT → Azure AD Bearer Token に交換<br>この Token で Azure ARM API (AppGW 操作)
+            を認証
+          </div>
+        </div>
+        <div class="arch-ext-item arch-ext-mcrg">
+          <div class="arch-ext-title">📋 MC_ リソースグループ (AKS 自動作成)</div>
+          <ul>
+            <li>Route Table (Pod CIDR → Node IP のルートを保持)</li>
+            <li>VMSS・NIC・Load Balancer 等</li>
+          </ul>
+          <div class="arch-ext-note">
+            ⬆️ AGIC が Route Table を読み取り<br>AppGW サブネットへ関連付け (Network Contributor 権限が必要)
+          </div>
+        </div>
+        <div class="arch-ext-item arch-ext-deploy">
+          <div class="arch-ext-title">🔧 デプロイ構成 (Terraform / Helm / kubectl)</div>
+          <ul>
+            <li><code>terraform apply</code> → VNet / AppGW / AKS / Identity / RBAC</li>
+            <li><code>helm install agic</code> → AGIC コントローラー + SA + ClusterRole</li>
+            <li><code>kubectl apply</code> → Namespace / App Deployment / Service / Ingress</li>
+          </ul>
+          <div class="arch-ext-note">⚠️ Helm デプロイでは Azure RBAC ロール割り当ては自動化されず手動設定が必要</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 制限事項 -->
+    <h2 id="sec4">⚠️ 4. 制限事項</h2>
+    <div class="grid-2col">
+      <div class="grid-item callout callout-danger">
+        <div class="card-title">AKS 制限事項</div>
+        <ul style="margin: 0; padding-left: 20px">
+          <li><strong>AKS SKU:</strong> Standard 以上必須 (Free ティアでは AGIC 動作不可)</li>
+          <li><strong>AGIC バージョン:</strong> v1.9.1 以上必須 (CNI Overlay サポート対応)</li>
+          <li><strong>CNI Overlay 固有制限:</strong> VM Availability Sets および DCsv2-series VM は非対応</li>
+          <li><strong>Kubernetes バージョン:</strong> LTS 専用パッチバージョンを使用する場合は Premium SKU 必須</li>
+        </ul>
+      </div>
+      <div class="grid-item callout callout-warning">
+        <div class="card-title">Application Gateway 制限事項</div>
+        <ul style="margin: 0; padding-left: 20px">
+          <li><strong>SKU 制限:</strong> Standard_v2 または WAF_v2 のみサポート</li>
+          <li>
+            <strong>フロントエンド IP:</strong> v2 はプライベート IP のみの構成 (Private Deployment)
+            も可能。本検証ではパブリック IP ＋ プライベート IP の両方を設定
+          </li>
+          <li>
+            <strong>AppGW サブネット:</strong> <code>Microsoft.Network/applicationGateways</code> の Delegation (委任)
+            が必須。サイズは /24 以下を推奨
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Service Type に関する制約と検証結果</h3>
+    <div class="callout callout-info">
+      <ul style="margin: 0; padding-left: 20px">
+        <li>
+          <strong>NodePort / ClusterIP 双方で疎通確認済み:</strong> 今回の検証では両方の Type で疎通が成功することを確認
+        </li>
+        <li>
+          <strong>AGIC v1.9.1 未満の場合:</strong> ServiceType <code>NodePort</code> が必須 (AppGW
+          バックエンドプールには Node VNet IP : NodePort が登録される)
+        </li>
+        <li>
+          <strong>AGIC v1.9.1 以上 ＋ Route Table 関連付け済みの場合:</strong> <code>ClusterIP</code> でも疎通可能
+          (AppGW バックエンドに Pod IP が直接登録され、VNet ルーティング経由で到達)
+        </li>
+      </ul>
+    </div>
+
+    <h3>必須 NSG ルール (Azure CNI Overlay)</h3>
+    <p>Azure CNI Overlay においてカスタム NSG を使用する場合、以下の通信許可ルールの設定が必須。</p>
+    <table>
+      <thead>
+        <tr>
+          <th>優先度</th>
+          <th>ルール名</th>
+          <th>方向</th>
+          <th>送信元</th>
+          <th>宛先</th>
+          <th>ポート</th>
+          <th>目的</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>100</td>
+          <td>AllowNodeToNode</td>
+          <td>Inbound</td>
+          <td>aks-subnet</td>
+          <td>aks-subnet</td>
+          <td>*</td>
+          <td>ノード間通信</td>
+        </tr>
+        <tr>
+          <td>110</td>
+          <td>AllowNodeToPod</td>
+          <td>Inbound</td>
+          <td>aks-subnet</td>
+          <td>pod CIDR</td>
+          <td>*</td>
+          <td>Service から Pod への転送</td>
+        </tr>
+        <tr>
+          <td>120</td>
+          <td>AllowPodToPod</td>
+          <td>Inbound</td>
+          <td>pod CIDR</td>
+          <td>pod CIDR</td>
+          <td>*</td>
+          <td>Pod 間通信・DNS (CoreDNS)</td>
+        </tr>
+        <tr>
+          <td>130</td>
+          <td>AllowAppGWToNodes</td>
+          <td>Inbound</td>
+          <td>appgw-subnet</td>
+          <td>aks-subnet</td>
+          <td>30000-32767</td>
+          <td>AppGW から NodePort へのアクセス</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 5. 経路について -->
+    <h2 id="sec5">🛣️ 5. 経路について — Ingress / Egress</h2>
+    <div class="grid-2col">
+      <div class="grid-item card" style="border-top: 4px solid #4caf50">
+        <div class="card-title">🔽 Ingress 経路 (今回の検証対象)</div>
+        <p><strong>経路:</strong> Client → AppGW (Private IP) → AKS Node (NodePort / Pod IP) → Pod</p>
+        <p>
+          外部や社内網からクラスター内のサービスへ到達するための「受信トラフィック」の制御。本検証の主目的として動作確認済み。
+        </p>
+      </div>
+      <div class="grid-item card" style="border-top: 4px solid #ff9800">
+        <div class="card-title">🔼 Egress 経路 (今回未検証・参考情報)</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.9rem">
+          <li>
+            <strong>デフォルト動作:</strong> AKS 既定の Egress は <code>outboundType = loadBalancer</code>。Pod
+            から外部への通信は Node IP で SNAT 後、Standard LB 経由で送信。
+          </li>
+          <li>
+            <strong>ファイアウォール経由要件:</strong> FW 等を強制経由する場合は <code>userDefinedRouting</code> ＋ UDR
+            設定が必要。
+          </li>
+          <li>
+            <strong>WAF 利用時の注意:</strong> AppGW WAF_v2 利用時、AppGW サブネットに UDR
+            の追加設定が必要となる想定。ただし誤った UDR
+            は非対称ルーティングやヘルスプローブ異常の要因となるため、管理トラフィックのインターネット直接送信設計に注意が必要。
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 6. NW モデル比較 -->
+    <h2 id="sec6">🌐 6. Azure ネットワークモデル比較</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>比較項目</th>
+          <th>Kubenet</th>
+          <th>Azure CNI (Flat)</th>
+          <th style="background-color: #e8f5e9; color: #1b5e20">✅ Azure CNI Overlay (今回)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>スケール上限</strong></td>
+          <td>400ノード / 250 Pod/node</td>
+          <td>大規模可 (IP 枯渇に注意)</td>
+          <td style="background: #f1f8e9">5,000ノード / 250 Pod/node</td>
+        </tr>
+        <tr>
+          <td><strong>Pod IP アドレス</strong></td>
+          <td>VNet 外 (プライベート CIDR)</td>
+          <td>VNet IP (直接割当)</td>
+          <td style="background: #f1f8e9">VNet 外 (プライベート CIDR)</td>
+        </tr>
+        <tr>
+          <td><strong>VNet IP 消費</strong></td>
+          <td>ノード分のみ</td>
+          <td>ノード＋Pod 分 (大量消費)</td>
+          <td style="background: #f1f8e9">ノード分のみ</td>
+        </tr>
+        <tr>
+          <td><strong>UDR / Route Table</strong></td>
+          <td>必須 (Pod→Node 転送用)</td>
+          <td>不要</td>
+          <td style="background: #f1f8e9">AGIC 連携で自動管理可能</td>
+        </tr>
+        <tr>
+          <td><strong>ネットワークポリシー</strong></td>
+          <td>Calico のみ</td>
+          <td>Azure NPM / Calico / Cilium</td>
+          <td style="background: #f1f8e9">Azure NPM / Calico / Cilium</td>
+        </tr>
+        <tr>
+          <td><strong>OS 対応</strong></td>
+          <td>Linux のみ</td>
+          <td>Linux / Windows</td>
+          <td style="background: #f1f8e9">Linux / Windows Server 2019+</td>
+        </tr>
+        <tr>
+          <td><strong>AppGW との疎通</strong></td>
+          <td>Route Table 関連付け必要</td>
+          <td>Pod IP へ直接到達</td>
+          <td style="background: #f1f8e9">Route Table または NodePort</td>
+        </tr>
+        <tr>
+          <td><strong>推奨用途</strong></td>
+          <td>小規模・簡易構成</td>
+          <td>Pod-外部間の直接通信が多い構成</td>
+          <td style="background: #f1f8e9"><strong>大規模・IP 節約・本検証構成</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 7. NW ポリシー比較 -->
+    <h2 id="sec7">🛡️ 7. ネットワークポリシー比較</h2>
+    <div class="grid-3col">
+      <div class="grid-item-3 card" style="border: 2px solid #4caf50">
+        <div class="card-title">🟢 Cilium (Azure 推奨)</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.9rem">
+          <li>eBPF ベースのデータプレーン</li>
+          <li>L7 ポリシー / FQDN フィルタリング対応</li>
+          <li>高パフォーマンス・高スケーラビリティ</li>
+          <li>Azure CNI Powered by Cilium で統合利用可能</li>
+          <li>Azure CNI Overlay 環境に完全対応</li>
+        </ul>
+      </div>
+      <div class="grid-item-3 card">
+        <div class="card-title">🔵 Azure NPM</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.9rem">
+          <li>iptables (Linux) / HNS ACLPolicies (Windows) ベース</li>
+          <li>⚠️ <strong>Windows ノード:</strong> 2026年9月30日にサポート終了予定</li>
+          <li>Linux スケール上限: 250ノード / 20,000ポッド</li>
+          <li>Kubernetes 標準ネットワークポリシーに準拠</li>
+        </ul>
+      </div>
+      <div class="grid-item-3 card">
+        <div class="card-title">🟠 Calico</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.9rem">
+          <li>Tigera 社が提供するオープンソースソリューション</li>
+          <li>Kubenet (Linux のみ) および Azure CNI 環境に対応</li>
+          <li>Kubernetes 標準ポリシーに準拠</li>
+          <li>※独自の Calico 拡張機能は AKS サポート対象外</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 8. 権限構成 -->
+    <h2 id="sec8">🔑 8. 権限構成</h2>
+
+    <h3>8-1. Identity 全体像</h3>
+    <div class="grid-2col">
+      <div class="grid-item card">
+        <div class="card-title">⚙️ System-Assigned MI<br><small>(AKS Control Plane)</small></div>
+        <ul style="margin-top: 8px; padding-left: 20px; font-size: 0.9rem">
+          <li><strong>用途:</strong> AKS が Azure API (VMSS, NIC, LB 等) を操作</li>
+          <li><strong>ライフサイクル:</strong> AKS クラスターと同期（削除時自動削除）</li>
+          <li><strong>付与ロール:</strong> Network Contributor @ aks-subnet</li>
+        </ul>
+      </div>
+      <div class="grid-item card">
+        <div class="card-title">👤 User-Assigned MI<br><small>(AGIC: agic-green-agic-identity)</small></div>
+        <ul style="margin-top: 8px; padding-left: 20px; font-size: 0.9rem">
+          <li><strong>用途:</strong> AGIC Pod が Azure API (AppGW 等) を操作</li>
+          <li><strong>ライフサイクル:</strong> クラスターとは独立（明示的な削除が必要）</li>
+          <li><strong>認証連携:</strong> Workload Identity / OIDC を利用</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="background-color: #f3e5f5; border-color: #ab47bc; margin-bottom: 24px">
+      <strong>🔗 Federated Identity Credential (OIDC 連携の要)</strong>
+      <ul style="margin-bottom: 0; font-family: monospace; font-size: 0.9rem">
+        <li>issuer: [AKS OIDC Issuer URL]</li>
+        <li>subject: system:serviceaccount:kube-system:<strong>{helm-release-name}-sa-ingress-azure</strong></li>
+      </ul>
+      <p style="margin: 8px 0 0 0; color: #d32f2f; font-size: 0.85rem">
+        ⚠️ Helm の release name が変更されると ServiceAccount 名 (subject) も変わるため不一致エラーの原因となる。
+      </p>
+    </div>
+
+    <h3>8-2. Azure RBAC ロール割り当て一覧</h3>
+    <div class="rbac-row rbac-row-normal">
+      <span class="rbac-tag rbac-tag-agic">AGIC UAI</span> → <strong>Reader</strong> @ agic-green-rg &nbsp;<small>(RG 全体の読み取り)</small>
+    </div>
+    <div class="rbac-row rbac-row-normal">
+      <span class="rbac-tag rbac-tag-agic">AGIC UAI</span> → <strong>Contributor</strong> @ AppGW &nbsp;<small>(AppGW 設定の読み書き)</small>
+    </div>
+    <div class="rbac-row rbac-row-normal">
+      <span class="rbac-tag rbac-tag-agic">AGIC UAI</span> → <strong>Network Contributor</strong> @ appgw-subnet
+      &nbsp;<small>(Route Table 関連付け)</small>
+    </div>
+    <div class="rbac-row rbac-row-important">
+      <span class="rbac-tag rbac-tag-agic">AGIC UAI</span> → ★
+      <strong>Network Contributor @ MC_ RG</strong> &nbsp;<small>重要: Route Table 読み取り（見落としやすい）</small>
+    </div>
+    <div class="rbac-row rbac-row-normal" style="margin-bottom: 16px">
+      <span class="rbac-tag rbac-tag-akscp">AKS CP MI</span> → <strong>Network Contributor</strong> @ aks-subnet
+      &nbsp;<small>(ノード NIC の接続)</small>
+    </div>
+
+    <div class="callout callout-danger" style="border: 2px solid #d32f2f">
+      <strong>⚠️ Helm デプロイにおけるロール割り当ての手動適用（推測含む）</strong><br>
+      AKS アドオン方式とは異なり、Helm を用いた AGIC インストールでは上記の Azure RBAC
+      ロール割り当ては自動化されず、Terraform または Azure CLI を用いた手動設定が必要となる。特に自動作成される
+      <code>MC_</code> リソースグループへの Network Contributor 権限付与は見落としやすいため厳重な注意が必要。
+    </div>
+
+    <div class="callout callout-dashed">
+      <strong>🔍 未検証: ACR Pull 権限について</strong><br>
+      コンテナイメージを Azure Container Registry (ACR) からプルする場合、AKS ノードプールの Kubelet Managed Identity
+      に対して <code>AcrPull</code> ロールの付与が必要。本検証では ACR
+      を使用していないため実機確認は未実施だが、実運用時には別途設定が必須となる。
+    </div>
+
+    <h3>8-3. なぜ AGIC だけ Workload Identity (OIDC) が必要か</h3>
+    <div class="callout callout-info" style="margin-bottom: 12px">
+      <strong>ポイント：</strong> AGIC Pod はクラスター内で唯一 Azure ARM API を直接呼び出すコンポーネントです。<br>
+      K8s Pod は通常 Azure Managed Identity を直接利用できないため、
+      <strong>Workload Identity (OIDC)</strong> を用いて K8s SA トークンを Azure AD トークンに変換します。
+    </div>
+    <div class="oidc-table-wrapper">
+      <table class="oidc-why-table">
+        <thead>
+          <tr>
+            <th>コンポーネント</th>
+            <th>実行場所</th>
+            <th>認証方式</th>
+            <th>OIDC 使用</th>
+            <th>Azure ARM 操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>AKS Control Plane</strong></td>
+            <td>Azure マネージドサービス</td>
+            <td>System-Assigned MI<br><small>(AKS 作成時に自動生成)</small></td>
+            <td style="text-align: center">❌ 不要</td>
+            <td>VMSS / NIC / LB 操作</td>
+          </tr>
+          <tr>
+            <td><strong>Kubelet (ノード)</strong></td>
+            <td>Azure VM (VMSS)</td>
+            <td>Kubelet Managed Identity</td>
+            <td style="text-align: center">❌ 不要</td>
+            <td>ACR Pull / ノード操作</td>
+          </tr>
+          <tr>
+            <td><strong>アプリ Pod (NodePort/ClusterIP)</strong></td>
+            <td>K8s Pod</td>
+            <td>不要 (Azure API 非呼び出し)</td>
+            <td style="text-align: center">❌ 不要</td>
+            <td>なし</td>
+          </tr>
+          <tr class="row-highlight">
+            <td><strong>🤖 AGIC Pod ← 唯一</strong></td>
+            <td>K8s Pod</td>
+            <td>
+              <strong>User-Assigned MI<br>+ Workload Identity (OIDC)</strong>
+            </td>
+            <td style="text-align: center"><strong>✅ 必要</strong></td>
+            <td>AppGW 設定変更<br>Route Table 操作</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout callout-warning" style="margin-bottom: 20px">
+      <strong>なぜ Workload Identity が必要か：</strong><br>
+      K8s Pod は Azure VM ではないため、通常の Managed Identity (IMDS) を利用できません。 Workload Identity は
+      <em>OIDC トークン交換</em> の仕組みを使い、
+      <strong>「AKS OIDC Issuer が発行した K8s SA JWT」を Azure AD が信頼し Bearer Token を発行</strong>することで、 Pod
+      が Azure ARM API を安全に呼び出せるようにします。<br>
+      旧来の AAD Pod Identity（非推奨・廃止方向）に代わる現在の推奨方式です。
+    </div>
+
+    <h3>8-4. Workload Identity 認証フロー（詳細）</h3>
+    <div class="vflow-container">
+      <div class="vflow-phase-banner vflow-phase-setup">📐 セットアップフェーズ（Terraform / 事前設定）</div>
+
+      <div class="vflow-step-box step-setup">
+        <div class="vflow-step-num num-indigo">①</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">AKS: OIDC Issuer 有効化 ＋ Workload Identity Webhook インストール</div>
+          <div class="vflow-step-detail">
+            <span class="vflow-step-code">oidc_issuer_enabled = true</span>
+            <span class="vflow-step-code">workload_identity_enabled = true</span><br>
+            → AKS が OIDC Issuer エンドポイントを公開<br>
+            → Webhook が SA annotation を検知し Pod に認証情報を注入できるよう準備
+          </div>
+        </div>
+      </div>
+      <div class="vflow-arrow-line"></div>
+
+      <div class="vflow-step-box step-setup">
+        <div class="vflow-step-num num-indigo">②</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">Azure AD: Federated Identity Credential 登録</div>
+          <div class="vflow-step-detail">
+            <span class="vflow-step-code">issuer = https://oidc.prod.aks.azure.com/&lt;tenant&gt;/&lt;uuid&gt;/</span><br>
+            <span class="vflow-step-code">subject = system:serviceaccount:kube-system:agic-sa-ingress-azure</span><br>
+            → この OIDC Issuer が発行した、この SA のトークンを信頼する設定<br>
+            ⚠️ <strong>subject は Helm の release name に依存</strong> — 変更時は再設定が必要
+          </div>
+        </div>
+      </div>
+
+      <div class="vflow-phase-banner vflow-phase-runtime" style="margin-top: 16px">
+        🚀 実行時フェーズ（AGIC Pod 起動時）
+      </div>
+
+      <div class="vflow-step-box step-runtime">
+        <div class="vflow-step-num num-green">③</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">Workload Identity Webhook が SA アノテーションを検知</div>
+          <div class="vflow-step-detail">
+            <span class="vflow-step-code">azure.workload.identity/client-id: &lt;agic-identity-client-id&gt;</span><br>
+            AGIC Pod の ServiceAccount に上記 annotation が付いていることを Webhook が確認
+          </div>
+        </div>
+      </div>
+      <div class="vflow-arrow-line"></div>
+
+      <div class="vflow-step-box step-runtime">
+        <div class="vflow-step-num num-green">④</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">環境変数 ＆ Projected Volume を AGIC Pod に注入</div>
+          <div class="vflow-step-detail">
+            <span class="vflow-step-code">AZURE_CLIENT_ID = &lt;UAI の client ID&gt;</span>
+            <span class="vflow-step-code">AZURE_TENANT_ID = &lt;テナント ID&gt;</span><br>
+            <span class="vflow-step-code">AZURE_FEDERATED_TOKEN_FILE = /var/run/secrets/azure/tokens/…</span><br>
+            → Projected ServiceAccount Token (audience: api://AzureADTokenExchange) が volume として提供される
+          </div>
+        </div>
+      </div>
+
+      <div class="vflow-phase-banner vflow-phase-azure" style="margin-top: 16px">🔐 Azure AD トークン交換フェーズ</div>
+
+      <div class="vflow-step-box step-azure">
+        <div class="vflow-step-num num-blue">⑤</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">AGIC SDK が Federated Token ファイルから K8s SA JWT を読み込み</div>
+          <div class="vflow-step-detail">
+            JWT ペイロード例:<br>
+            <span class="vflow-step-code">iss: https://oidc.prod.aks.azure.com/…</span>
+            <span class="vflow-step-code">sub: system:serviceaccount:kube-system:agic-sa-ingress-azure</span>
+            <span class="vflow-step-code">aud: ["api://AzureADTokenExchange"]</span>
+          </div>
+        </div>
+      </div>
+      <div class="vflow-arrow-line"></div>
+
+      <div class="vflow-step-box step-azure">
+        <div class="vflow-step-num num-blue">⑥</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">Azure AD が Federated Identity Credential と照合</div>
+          <div class="vflow-step-detail">
+            issuer 一致確認 → ✅<br>
+            subject 一致確認 → ✅<br>
+            ② で登録した設定と完全一致した場合のみ認証成功
+          </div>
+        </div>
+      </div>
+
+      <div class="vflow-phase-banner vflow-phase-result" style="margin-top: 16px">
+        ✅ 認証完了 → Azure ARM API 呼び出し可能
+      </div>
+
+      <div class="vflow-step-box step-final">
+        <div class="vflow-step-num num-teal">⑦</div>
+        <div class="vflow-step-content">
+          <div class="vflow-step-title">Azure AD が User-Assigned MI の Bearer Token を発行</div>
+          <div class="vflow-step-detail">
+            AGIC は Azure Resource Manager API を呼び出し可能な状態に<br>
+            → AppGW のバックエンドプール / ルーティングルール / ヘルスプローブ の CRUD<br>
+            → MC_RG の Route Table 読み取り ＋ appgw-subnet への関連付け
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>8-5. CNI Overlay Route Table フロー</h3>
+    <div class="grid-3col">
+      <div class="grid-item-3 card">
+        <div class="card-title">Step 1</div>
+        <p>AKS が <code>MC_</code> リソースグループ内に Route Table を自動作成。<br>例: 192.168.0.0/24 → Node 0</p>
+      </div>
+      <div class="grid-item-3 card">
+        <div class="card-title">Step 2</div>
+        <p>AGIC が自動作成された Route Table を AppGW サブネットに関連付け。<br>(※ Network Contributor 権限が必要)</p>
+      </div>
+      <div class="grid-item-3 card">
+        <div class="card-title">Step 3</div>
+        <p>AppGW から VNet 外の Pod IP (192.168.x.x) へ VNet ルーティング経由で直接パケット到達が可能になる。</p>
+      </div>
+    </div>
+
+    <!-- 9. エラーパターン -->
+    <h2 id="sec9">🚫 9. 権限不足エラーパターン</h2>
+    <div class="grid-2col">
+      <div class="grid-item card">
+        <span class="status-badge bg-auth">AUTH</span> <strong>AADSTS700213</strong><br>
+        <span style="font-size: 0.9rem">Federated Identity Credential の subject (SA 名) 不一致エラー。Helm のリリース名変更が主な原因。</span>
+      </div>
+      <div class="grid-item card">
+        <span class="status-badge bg-auth">AUTH</span> <strong>AADSTS70011</strong><br>
+        <span style="font-size: 0.9rem">identityClientID の設定誤り。Helm values への正しい Client ID の渡し忘れ。</span>
+      </div>
+      <div class="grid-item card">
+        <span class="status-badge bg-perm">権限</span> <strong>403 routeTables/read</strong><br>
+        <span style="font-size: 0.9rem"><code>MC_</code> RG に対する Network Contributor ロールの付与漏れ。</span>
+      </div>
+      <div class="grid-item card">
+        <span class="status-badge bg-perm">権限</span> <strong>Unhealthy routeTables/join/action</strong><br>
+        <span style="font-size: 0.9rem">appgw-subnet に対する Network Contributor ロールの付与漏れ。関連付けに失敗。</span>
+      </div>
+      <div class="grid-item card">
+        <span class="status-badge bg-boot">起動</span> <strong>context deadline exceeded</strong><br>
+        <span style="font-size: 0.9rem">権限や認証エラー起因による AGIC Pod の CrashLoopBackOff。</span>
+      </div>
+      <div class="grid-item card">
+        <span class="status-badge bg-conf">設定</span> <strong>K8sVersionNotSupported</strong><br>
+        <span style="font-size: 0.9rem">Standard SKU における LTS 専用パッチバージョンの指定エラー。</span>
+      </div>
+    </div>
+
+    <!-- 10. チェックリスト -->
+    <h2 id="sec10">☑️ 10. 実務チェックリスト</h2>
+    <div class="grid-2col">
+      <div class="grid-item card">
+        <div class="card-title">インフラ / NW 設定</div>
+        <ul class="checklist-ul">
+          <li><input type="checkbox" disabled="" checked=""> AKS SKU: Standard 以上</li>
+          <li><input type="checkbox" disabled="" checked=""> AGIC: v1.9.1 以上</li>
+          <li><input type="checkbox" disabled="" checked=""> AppGW SKU: Standard_v2 または WAF_v2</li>
+          <li><input type="checkbox" disabled="" checked=""> AppGW サブネット Delegation 設定</li>
+          <li><input type="checkbox" disabled="" checked=""> AKS OIDC Issuer 有効化</li>
+          <li><input type="checkbox" disabled="" checked=""> Workload Identity Webhook 有効化</li>
+          <li><input type="checkbox" disabled="" checked=""> NSG ルール 4 件設定済み</li>
+          <li><input type="checkbox" disabled="" checked=""> CNI Overlay: <code>network_plugin_mode = "overlay"</code></li>
+        </ul>
+      </div>
+      <div class="grid-item card">
+        <div class="card-title">権限 / Identity 設定</div>
+        <ul class="checklist-ul">
+          <li><input type="checkbox" disabled="" checked=""> AGIC UAI 作成</li>
+          <li><input type="checkbox" disabled="" checked=""> Federated Identity Credential 登録 (subject 完全一致)</li>
+          <li><input type="checkbox" disabled="" checked=""> AGIC UAI: Reader @ RG</li>
+          <li><input type="checkbox" disabled="" checked=""> AGIC UAI: Contributor @ AppGW</li>
+          <li><input type="checkbox" disabled="" checked=""> AGIC UAI: Network Contributor @ appgw-subnet</li>
+          <li><input type="checkbox" disabled="" checked=""> AGIC UAI: <strong>★ Network Contributor @ MC_ RG</strong></li>
+          <li><input type="checkbox" disabled="" checked=""> AKS CP MI: Network Contributor @ aks-subnet</li>
+          <li><input type="checkbox" disabled=""> (未検証) Kubelet MI: AcrPull @ ACR</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 11. 参考資料 -->
+    <h2 id="sec11">📚 11. 参考資料 (公式ドキュメント・リンク集)</h2>
+
+    <div class="card" style="margin-bottom: 16px">
+      <strong>🔷 1. AGIC 公式ドキュメント</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-overview" target="_blank">Application Gateway イングレス コントローラーとは</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-install-new" target="_blank">Helm のグリーンフィールド デプロイ</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-install-existing" target="_blank">Helm のブラウンフィールド デプロイ</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/tutorial-ingress-controller-add-on-new" target="_blank">AKS アドオンのグリーンフィールド デプロイ</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/tutorial-ingress-controller-add-on-existing" target="_blank">AKS アドオンのブラウンフィールド デプロイ</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-private-ip" target="_blank">プライベート IP を使用した内部ルーティング</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px">
+      <strong>🔷 2. Application Gateway 関連</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/application-gateway/configuration-frontend-ip" target="_blank">Application Gateway フロントエンド IP 構成</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/application-gateway/application-gateway-private-deployment" target="_blank">Application Gateway プライベートデプロイ</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/application-gateway/configuration-infrastructure" target="_blank">Application Gateway インフラ構成 (UDR の制限事項等)</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px">
+      <strong>🔷 3. AKS ネットワーク関連</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/concepts-network" target="_blank">AKS ネットワークの概念</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/ja-jp/azure/aks/concepts-network-azure-cni-overlay" target="_blank">Azure CNI Overlay の概念</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/azure-cni-overlay" target="_blank">Azure CNI Overlay の設定手順</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/egress-outboundtype" target="_blank">AKS アウトバウンドタイプ (Egress 制御)</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/load-balancer-standard" target="_blank">AKS Standard Load Balancer</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px">
+      <strong>🔷 4. ネットワークポリシー関連</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/use-network-policies" target="_blank">AKS ネットワークポリシー構成</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/azure-cni-powered-by-cilium" target="_blank">Azure CNI Powered by Cilium の利用</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/network-policy-best-practices" target="_blank">ネットワークポリシー ベストプラクティス</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px">
+      <strong>🔷 5. 権限 / Identity 関連</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/use-managed-identity" target="_blank">AKS Managed Identity の利用</a>
+        </li>
+        <li>
+          <a href="https://learn.microsoft.com/en-us/azure/aks/cluster-container-registry-integration" target="_blank">AKS と ACR の統合 (AcrPull 権限)</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <strong>🔷 6. コミュニティ / Q&amp;A / 実装例</strong>
+      <ul class="link-list">
+        <li>
+          <a href="https://learn.microsoft.com/en-us/answers/questions/5573663/how-to-use-the-addon-for-ingress-appgw-with-aks-th" target="_blank">How to use AGIC with AKS CNI overlay (Q&amp;A)</a>
+        </li>
+        <li>
+          <a href="https://docs.azure.cn/en-us/aks/create-k8s-cluster-with-aks-application-gateway-ingress" target="_blank">Terraform で AKS + AGIC 作成 (Azure.cn ドキュメント)</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="footer">作成日: 2026-03-25 | 検証環境: AKS Standard / AGIC Helm / CNI Overlay / Private 接続</div>
+  
+
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body></html>
