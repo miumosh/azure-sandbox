@@ -1,4 +1,4 @@
-# overlay-test — AKS + AGIC CNI Overlay 疎通検証
+# AKS + AGIC CNI Overlay 疎通検証
 
 NodePort / ClusterIP の両 Service type に対して AGIC (Application Gateway Ingress Controller) 経由のルーティングを検証する最小構成環境。
 
@@ -114,18 +114,6 @@ helm install agic \
   -f ../helm/agic/agic-values.yaml
 ```
 
-<!-- インストール済みで `identityClientID` だけ書き換えたい場合:
-
-```bash
-# terraform/ で実行
-helm upgrade agic \
-  oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
-  --version 1.9.1 \
-  --namespace kube-system \
-  --set armAuth.identityClientID=$(terraform output -raw agic_identity_client_id) \
-  -f ../helm/agic/agic-values.yaml
-``` -->
-
 AGIC Pod の起動確認:
 
 ```bash
@@ -219,18 +207,6 @@ kubectl get ingress -w
 | vm-subnet | `10.0.3.0/24` |
 | Pod CIDR (CNI Overlay) | `192.168.0.0/16` |
 | Service CIDR | `10.100.0.0/16` |
-
----
-
-## グローバル IP の再更新
-
-IP が変わって SSH できなくなった場合:
-
-```bash
-# terraform/ で実行
-bash ../scripts/update_my_ip.sh
-terraform apply -target=azurerm_network_security_rule.vm_allow_ssh
-```
 
 ---
 
