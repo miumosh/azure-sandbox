@@ -1,0 +1,37 @@
+# AGIC Public — インターネットからのパブリックアクセス用
+#
+# helm install agic-public \
+#   oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#   --version 1.9.1 \
+#   --namespace agic-public \
+#   --create-namespace \
+#   --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+#   --set armAuth.identityClientID=$(terraform output -raw agic_public_identity_client_id) \
+#   -f ../helm/agic-public/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set で上書き
+  resourceGroup: "multi-appgw-rg"
+  name: "multi-appgw-public"
+  usePrivateIP: false
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  ingressClass: azure/application-gateway-public
+  # IngressClass リソースを一意の名前で作成する。
+  # NG 構成ではデフォルト名 "azure-application-gateway" が衝突していた。
+  ingressClassResource:
+    name: azure-application-gateway-public
+    enabled: true
+    default: false
+    controllerValue: "azure/application-gateway-public"
+  # 監視対象を app-public Namespace に限定する。
+  # NG 構成では "" (全 Namespace) のため両 AGIC が全 Ingress を処理し干渉していた。
+  watchNamespace: "app-public"

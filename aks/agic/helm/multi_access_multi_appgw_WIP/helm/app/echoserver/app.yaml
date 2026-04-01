@@ -1,0 +1,91 @@
+---
+# 共通テスト用 echo アプリ
+# Private / Public 両方の AppGW からルーティングされる
+# kubectl apply -n app-private -f app.yaml
+# kubectl apply -n app-public -f app.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echoserver-html
+data:
+  index.html: |
+    <html>
+    <body>
+    <h1>echoserver — multi-appgw test</h1>
+    <p>Pod: __POD_NAME__</p>
+    <p>Node: __NODE_NAME__</p>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echoserver
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: echoserver
+  template:
+    metadata:
+      labels:
+        app: echoserver
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+            - name: html-tmpl
+              mountPath: /usr/share/nginx/html-tmpl
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    sed -e "s/__POD_NAME__/$POD_NAME/" \
+                        -e "s/__NODE_NAME__/$NODE_NAME/" \
+                        /usr/share/nginx/html-tmpl/index.html \
+                        > /usr/share/nginx/html/index.html
+      volumes:
+        - name: html
+          emptyDir: {}
+        - name: html-tmpl
+          configMap:
+            name: echoserver-html
+      initContainers:
+        - name: copy-html
+          image: nginx:1.27-alpine
+          command: ["sh", "-c", "cp /tmpl/* /html/"]
+          volumeMounts:
+            - name: html-tmpl
+              mountPath: /tmpl
+            - name: html
+              mountPath: /html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echoserver-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: echoserver
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP

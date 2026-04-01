@@ -1,0 +1,37 @@
+# AGIC Private — Hub VNet (オンプレ想定) からのプライベートアクセス用
+#
+# helm install agic-private \
+#   oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+#   --version 1.9.1 \
+#   --namespace agic-private \
+#   --create-namespace \
+#   --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+#   --set armAuth.identityClientID=$(terraform output -raw agic_private_identity_client_id) \
+#   -f ../helm/agic-private/agic-values.yaml
+
+appgw:
+  subscriptionId: ""   # --set で上書き
+  resourceGroup: "multi-appgw-rg"
+  name: "multi-appgw-private"
+  usePrivateIP: true
+  shared: false
+
+armAuth:
+  type: workloadIdentity
+  identityClientID: "" # --set で上書き
+
+rbac:
+  enabled: true
+
+kubernetes:
+  ingressClass: azure/application-gateway-private
+  # IngressClass リソースを一意の名前で作成する。
+  # NG 構成ではデフォルト名 "azure-application-gateway" が衝突していた。
+  ingressClassResource:
+    name: azure-application-gateway-private
+    enabled: true
+    default: false
+    controllerValue: "azure/application-gateway-private"
+  # 監視対象を app-private Namespace に限定する。
+  # NG 構成では "" (全 Namespace) のため両 AGIC が全 Ingress を処理し干渉していた。
+  watchNamespace: "app-private"
