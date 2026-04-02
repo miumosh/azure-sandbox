@@ -1,0 +1,4 @@
+subscription_id  = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+my_public_ip     = "x.x.x.x/32"
+vm_admin_username = "azureuser"
+vm_admin_password = "P@ssw0rd1234!"

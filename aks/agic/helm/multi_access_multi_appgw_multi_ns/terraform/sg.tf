@@ -97,6 +97,11 @@ resource "azurerm_network_security_group" "appgw_private" {
 resource "azurerm_subnet_network_security_group_association" "appgw_private" {
   subnet_id                 = azurerm_subnet.appgw_private.id
   network_security_group_id = azurerm_network_security_group.appgw_private.id
+
+  depends_on = [
+    azurerm_network_security_rule.appgw_private_allow_gw_manager,
+    azurerm_network_security_rule.appgw_private_allow_lb,
+  ]
 }
 
 # AppGW v2 必須 — Azure インフラヘルスプローブ
@@ -113,8 +118,6 @@ resource "azurerm_network_security_rule" "appgw_private_allow_gw_manager" {
   destination_address_prefix  = "*"
   resource_group_name         = azurerm_resource_group.rg.name
   network_security_group_name = azurerm_network_security_group.appgw_private.name
-
-  depends_on = [azurerm_application_gateway.private]
 }
 
 # AppGW v2 必須 — Azure Load Balancer ヘルスプローブ
@@ -159,6 +162,11 @@ resource "azurerm_network_security_group" "appgw_public" {
 resource "azurerm_subnet_network_security_group_association" "appgw_public" {
   subnet_id                 = azurerm_subnet.appgw_public.id
   network_security_group_id = azurerm_network_security_group.appgw_public.id
+
+  depends_on = [
+    azurerm_network_security_rule.appgw_public_allow_gw_manager,
+    azurerm_network_security_rule.appgw_public_allow_lb,
+  ]
 }
 
 # depends_on: destroy 時に AppGW より先にこのルールが削除されるのを防ぐ
@@ -174,8 +182,6 @@ resource "azurerm_network_security_rule" "appgw_public_allow_gw_manager" {
   destination_address_prefix  = "*"
   resource_group_name         = azurerm_resource_group.rg.name
   network_security_group_name = azurerm_network_security_group.appgw_public.name
-
-  depends_on = [azurerm_application_gateway.public]
 }
 
 resource "azurerm_network_security_rule" "appgw_public_allow_lb" {

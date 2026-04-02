@@ -1,0 +1,576 @@
+# multi_access_multi_appgw — AppGW x2 + AGIC x2 構成 (Helm)
+
+Ingress 経由の Private 接続 (オンプレ想定) と Public 接続 (顧客想定) を、それぞれ専用の WAF_v2 AppGW + AGIC で受けて AKS の同一アプリにルーティングする構成。
+
+- **Private Ingress**: Hub VNet の VM → VNet Peering → Private AppGW (10.2.1.10) → Pod
+- **Public Ingress**: インターネット → Public AppGW (Public IP) → Pod
+- **AKS Egress**: デフォルト LB を使わず Azure Firewall (Basic SKU) 経由
+
+> **参考ドキュメント:**
+> - [AGIC Overview — Helm と AKS アドオンの違い](https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-overview)
+> - [AGIC 複数 Namespace サポート](https://learn.microsoft.com/ja-jp/azure/application-gateway/ingress-controller-multiple-namespace-support)
+
+---
+
+## NG 構成 (`multi_access_multi_appgw_NG/`) からの修正点
+
+同じ AppGW x2 + AGIC x2 構成を `multi_access_multi_appgw_NG/` で試みたが動作しなかった。本構成はその問題を修正したもの。
+
+### NG 構成の失敗原因
+
+AGIC Helm chart v1.9.1 のテンプレート分析の結果、リソース名の状況は以下の通り:
+
+| リソース | スコープ | 名前パターン | 複数インスタンス |
+|---|---|---|---|
+| ServiceAccount | Namespaced | `{release名}-sa-ingress-azure` | release名で自動分離 |
+| ConfigMap | Namespaced | `{release名}-cm-ingress-azure` | release名で自動分離 |
+| Deployment | Namespaced | `{release名}-ingress-azure` | release名で自動分離 |
+| ClusterRole | **Cluster** | `{release名}-ingress-azure` | release名で自動分離 |
+| ClusterRoleBinding | **Cluster** | `{release名}-ingress-azure` | release名で自動分離 |
+| **IngressClass** | **Cluster** | **`azure-application-gateway` (デフォルト)** | **要設定変更** |
+
+**真の失敗原因は 3 点:**
+
+1. **IngressClass リソース名がデフォルト (`azure-application-gateway`) のまま衝突** — 唯一デフォルトがハードコードされたクラスタスコープリソース。ただし `kubernetes.ingressClassResource.name` と `controllerValue` で変更可能
+2. **`watchNamespace: ""` で全 Namespace を監視** — 両 AGIC が全 Ingress を処理し、互いの AppGW 設定を上書き
+3. **Overlay Extension Config (`agic-overlay-extension-config`) の競合 (CNI Overlay 利用時のみ)** — CNI Overlay 環境でのみ AGIC が起動時に作成する CRD リソース。Azure CNI (非 Overlay) や Kubenet では作成されないため本問題は発生しない。名前が AGIC ソースコード ([`pkg/cni/overlay.go`](https://github.com/Azure/application-gateway-kubernetes-ingress/blob/master/pkg/cni/overlay.go)) に Go const としてハードコードされており変更不可。**Namespace スコープ**のリソースだが、NG 構成では両 AGIC を同一 Namespace (`kube-system`) にデプロイしたため競合が発生。AGIC を別 Namespace にデプロイすることで回避可能
+
+> 注: ClusterRole/ClusterRoleBinding は NG 構成でも release名 (`agic-private` / `agic-public`) で分離されていた。
+
+### Overlay Extension Config 問題の詳細
+
+#### NG 構成で発生した具体的なエラー (CNI Overlay 利用時のみ)
+
+本問題は AKS が CNI Overlay (`network_plugin_mode = "overlay"`) を使用している場合にのみ発生する。Azure CNI (非 Overlay) や Kubenet では overlay extension config 自体が作成されないため、本問題は起きない。
+
+両 AGIC を同一 Namespace (`kube-system`) にデプロイした際、以下の競合が発生した:
+
+```
+# agic-private: overlay extension config の作成を試みるが、タイムアウト
+I0330 14:30:20.407148  overlay.go:142] Creating overlay extension config with subnet CIDR 10.2.1.0/24
+I0330 14:30:20.427984  overlay.go:171] Waiting for overlay extension config to be ready
+  ... (30秒間リトライ)
+W0330 14:30:50.418456  controller.go:128] failed to reconcile overlay CNI:
+  failed to reconcile overlay resources: timed out waiting for overlay extension config to be ready
+
+# agic-public: 同じリソースを上書きし、自身のサブネット (10.2.2.0/24) で成功
+# → agic-private の AppGW サブネット (10.2.1.0/24) のルーティングが設定されない
+
+# 結果: agic-private の AppGW バックエンドヘルスが Unhealthy
+Address        Health     HealthProbeLog
+192.168.0.14   Unhealthy  Time taken by the backend to respond ... more than the time-out threshold
+192.168.0.231  Unhealthy  Time taken by the backend to respond ... more than the time-out threshold
+```
+
+原因は `overlayextensionconfigs.acn.azure.com` CRD の `agic-overlay-extension-config` リソースが同一 Namespace 内で 1 つしか存在できないこと。勝った方の AGIC のサブネットのみ overlay ルーティングが設定され、負けた方の AppGW → Pod IP 通信がタイムアウトする。
+
+#### リソース名のハードコードと Namespace スコープ
+
+`OverlayExtensionConfigName` は AGIC ソースコード ([`pkg/cni/overlay.go`](https://github.com/Azure/application-gateway-kubernetes-ingress/blob/master/pkg/cni/overlay.go)) に Go の `const` として定義されており、**変数注入による名前変更は不可能**:
+
+```go
+const (
+    OverlayExtensionConfigName = "agic-overlay-extension-config"
+
+    OverlayConfigReconcileTimeout = 30 * time.Second
+
+    OverlayConfigReconcilePollInterval = 2 * time.Second
+)
+```
+
+環境変数・Helm values・Ingress アノテーション等で上書きする仕組みは提供されていない。
+
+**ただし、このリソースは Namespace スコープである。** ソースコード上で `Namespace: r.namespace` (AGIC がデプロイされた Namespace) が指定されている:
+
+```go
+ObjectMeta: meta_v1.ObjectMeta{
+    Name:      OverlayExtensionConfigName,  // "agic-overlay-extension-config" (固定)
+    Namespace: r.namespace,                  // AGIC のデプロイ先 Namespace
+}
+```
+
+NG 構成では両 AGIC を `kube-system` にデプロイしていたため、同一 Namespace 内で同名リソースが競合した。本構成では AGIC を別 Namespace (`agic-private` / `agic-public`) にデプロイするため、各 Namespace に独立した overlay extension config が作成され競合しない:
+
+| 構成 | AGIC Namespace | 作成されるリソース | 競合 |
+|---|---|---|---|
+| NG | 両方 `kube-system` | `kube-system/agic-overlay-extension-config` x2 | **する** |
+| 本構成 | `agic-private` / `agic-public` | `agic-private/agic-overlay-extension-config` + `agic-public/agic-overlay-extension-config` | **しない** |
+
+> **参考:**
+> - AGIC ソースコード: [`pkg/cni/overlay.go`](https://github.com/Azure/application-gateway-kubernetes-ingress/blob/master/pkg/cni/overlay.go) — `OverlayExtensionConfigName` 定数定義
+> - 関連 Issue: [#1524](https://github.com/Azure/application-gateway-kubernetes-ingress/issues/1524)
+> - 関連 PR: [#1650](https://github.com/Azure/application-gateway-kubernetes-ingress/pull/1650)
+
+### NG との差分
+
+| 項目 | NG (失敗) | 本構成 (修正) |
+|---|---|---|
+| AGIC デプロイ先 | 両方 `kube-system` | `agic-private` / `agic-public` |
+| `watchNamespace` | `""` (全 NS) | 両方 `"common-apps"` |
+| `ingressClassResource.enabled` | private=true, public=false | 両方 true |
+| `ingressClassResource.name` | デフォルト (`azure-application-gateway`) | `azure-application-gateway-private` / `-public` |
+| `ingressClassResource.controllerValue` | デフォルト | `azure/application-gateway-private` / `-public` |
+| Federated Credential subject | `system:serviceaccount:kube-system:...` | `system:serviceaccount:agic-private:...` / `agic-public:...` |
+| アプリ Namespace | `default` | `common-apps` |
+| Ingress Namespace | `default` | `common-apps` |
+
+### Namespace 設計の変遷: Namespace 分離 → common-apps 集約
+
+NG 構成の修正直後は、AGIC ごとにアプリ Namespace を分離する設計だった:
+
+| Namespace | 配置リソース | AGIC の watchNamespace |
+|---|---|---|
+| `app-private` | echoserver + Private Ingress | agic-private → `app-private` |
+| `app-public` | echoserver + Public Ingress | agic-public → `app-public` |
+
+**問題:** 同じバックエンドアプリ (echoserver) を 2 つの Namespace に重複デプロイする必要があり、今後バックエンドコンポーネントが増えた場合にもすべて二重管理になる。
+
+**変更:** アプリと Ingress を単一の `common-apps` Namespace に集約し、両 AGIC が同じ Namespace を監視する設計に変更した。
+
+```
+変更前:                              変更後:
+  agic-private → app-private           agic-private ─┐
+  agic-public  → app-public            agic-public  ─┴→ common-apps
+```
+
+**同一 Namespace を監視しても問題ない理由:**
+
+NG 構成で問題だったのは以下の 3 点の**組み合わせ**であり、`watchNamespace` の重複単体は問題ではない:
+
+1. IngressClass リソース名がデフォルトのまま衝突
+2. `watchNamespace: ""` (全 NS 監視) で意図しない Ingress まで処理
+3. 同一 Namespace の overlay extension config が競合
+
+本構成ではすべて解消済みのため、各 AGIC は Ingress の `kubernetes.io/ingress.class` アノテーションで自分の担当のみ処理する:
+
+| Ingress | アノテーション | 処理する AGIC |
+|---|---|---|
+| `echoserver-private-ingress` | `azure/application-gateway-private` | agic-private のみ |
+| `echoserver-public-ingress` | `azure/application-gateway-public` | agic-public のみ |
+
+Kubernetes の Ingress はバックエンド Service と**同一 Namespace** にある必要があるため、Ingress も `common-apps` に配置する。
+
+---
+
+## アーキテクチャ
+
+```
+                  Internet
+                     │
+  ┌─── Spoke VNet (10.2.0.0/16) ─────────────────────────┐
+  │           ┌──────┴───────┐                           │
+  │           │ Public AppGW │ (WAF_v2)     ← Public     │
+  │           │  Public IP   │               Ingress     │
+  │           └──────┬───────┘                           │
+  │                  │                                   │
+  │  ┌───────────────┼───────────────┐                   │
+  │  │          AKS Cluster          │                   │
+  │  │  (CNI Overlay / Pod CIDR      │                   │
+  │  │   192.168.0.0/16)             │                   │
+  │  │                               │                   │
+  │  │  NS: agic-private             │                   │
+  │  │    └ AGIC Pod (→ Private AppGW)                   │
+  │  │  NS: agic-public              │                   │
+  │  │    └ AGIC Pod (→ Public AppGW)│                   │
+  │  │  NS: common-apps              │                   │
+  │  │    └ echoserver + Ingress x2  │                   │
+  │  └───────────────┬───────────────┘                   │
+  │                  │                                   │
+  │  ┌───────────────┼──────────┐                        │
+  │  │ Private AppGW (WAF_v2)   │         ← Private      │
+  │  │ Private IP: 10.2.1.10    │          Ingress       │
+  │  └───────────────┬──────────┘                        │
+  └──────────────────┼───────────────────────────────────┘
+                     │ VNet Peering
+  ┌─── Hub VNet (10.1.0.0/16) ───────────────────────────┐
+  │                  │                                   │
+  │  ┌───────────────┼──────────┐  ┌──────────────────┐  │
+  │  │   Test VM (10.1.1.x)     │  │  Azure Firewall  │  │
+  │  │   オンプレ想定            │  │  (Basic SKU)     │  │
+  │  └──────────────────────────┘  │  AKS Egress用    │  │
+  │                                └──────────────────┘  │
+  └──────────────────────────────────────────────────────┘
+```
+
+---
+
+## Namespace 戦略
+
+| Namespace | 用途 | 配置リソース |
+|---|---|---|
+| `agic-private` | AGIC Private のデプロイ先 | AGIC Pod, ServiceAccount, ConfigMap |
+| `agic-public` | AGIC Public のデプロイ先 | AGIC Pod, ServiceAccount, ConfigMap |
+| `common-apps` | バックエンドアプリ + Ingress | echoserver Deployment/Service, Ingress (Private/Public) |
+
+両 AGIC は `watchNamespace: "common-apps"` で同一 Namespace を監視する。Ingress の `kubernetes.io/ingress.class` アノテーションにより処理対象が分離されるため、干渉は発生しない:
+- `agic-private` → `ingressClass: azure/application-gateway-private` の Ingress のみ処理
+- `agic-public` → `ingressClass: azure/application-gateway-public` の Ingress のみ処理
+
+> **設計意図:** バックエンドアプリを単一 Namespace に集約することで、今後拡張するバックエンドコンポーネントと同じ名前空間で管理できる。Kubernetes の Ingress はバックエンド Service と同一 Namespace にある必要があるため、Ingress も `common-apps` に配置する。
+
+---
+
+## ディレクトリ構成
+
+```
+multi_access_multi_appgw/
+├── terraform/                       # ★ 作業ディレクトリ
+│   ├── versions.tf                  # azurerm ~> 4.14
+│   ├── variables.tf
+│   ├── terraform.tfvars
+│   ├── rg.tf                        # Resource Group
+│   ├── nw.tf                        # Hub VNet + Spoke VNet + Peering
+│   ├── sg.tf                        # NSG (AKS / AppGW Private / AppGW Public / VM)
+│   ├── firewall.tf                  # Azure Firewall Basic + Policy + Rules
+│   ├── rt.tf                        # Route Table (AKS → Firewall)
+│   ├── appgw_private.tf             # Private Ingress 用 AppGW (WAF_v2)
+│   ├── appgw_public.tf              # Public Ingress 用 AppGW (WAF_v2)
+│   ├── aks.tf                       # AKS (CNI Overlay / UDR Egress)
+│   ├── identity.tf                  # AGIC MI x2 + Federated Credential x2 (★ NG から修正)
+│   ├── role.tf                      # RBAC Role Assignments
+│   ├── vm.tf                        # Test VM (Hub VNet)
+│   └── outputs.tf
+├── helm/
+│   ├── agic-private/
+│   │   └── agic-values.yaml         # Private Ingress 用 AGIC (★ 修正版)
+│   ├── agic-public/
+│   │   └── agic-values.yaml         # Public Ingress 用 AGIC (★ 修正版)
+│   ├── app/
+│   │   └── echoserver/
+│   │       └── app.yaml             # echoserver Deployment + ClusterIP Service
+│   └── ingress/
+│       ├── ingress-private.yaml     # Private Ingress (NS: app-private)
+│       └── ingress-public.yaml      # Public Ingress (NS: app-public)
+├── README.md
+└── commands.md
+```
+
+---
+
+## 前提条件
+
+| ツール | バージョン |
+|---|---|
+| Terraform | >= 1.5.0 |
+| Azure CLI (`az`) | 最新 |
+| kubectl | 最新 |
+| Helm | >= 3.x |
+
+```bash
+az login
+az account set --subscription <SUBSCRIPTION_ID>
+```
+
+---
+
+## ネットワーク構成
+
+| リソース | CIDR / IP |
+|---|---|
+| Hub VNet | `10.1.0.0/16` |
+| AzureFirewallSubnet | `10.1.0.0/26` |
+| AzureFirewallManagementSubnet | `10.1.0.64/26` |
+| vm-subnet | `10.1.1.0/24` |
+| Spoke VNet | `10.2.0.0/16` |
+| appgw-private-subnet | `10.2.1.0/24` |
+| appgw-public-subnet | `10.2.2.0/24` |
+| aks-subnet | `10.2.3.0/24` |
+| Private Ingress AppGW IP | `10.2.1.10` |
+| Pod CIDR (CNI Overlay) | `192.168.0.0/16` |
+| Service CIDR | `10.100.0.0/16` |
+
+---
+
+## Ingress の Private / Public 分離方式
+
+AGIC を 2 インスタンスデプロイし、`ingressClassResource.name` + `watchNamespace` で処理対象を完全分離する。
+
+| AGIC | Namespace | IngressClass リソース名 | watchNamespace | AppGW |
+|---|---|---|---|---|
+| agic-private | `agic-private` | `azure-application-gateway-private` | `common-apps` | multi-appgw-private |
+| agic-public | `agic-public` | `azure-application-gateway-public` | `common-apps` | multi-appgw-public |
+
+### WAF Policy の紐付け方式
+
+本構成では AppGW が 2 つあるため、WAF Policy は各 AppGW の `firewall_policy_id` に直接紐付ける（Terraform の `appgw_private.tf` / `appgw_public.tf` で設定）。
+
+---
+
+## コスト概算
+
+| リソース | 概算コスト |
+|---|---|
+| Azure Firewall Basic | ~$0.10/hr |
+| AppGW WAF_v2 x2 | ~$0.36/hr x2 = $0.72/hr |
+| AKS (Standard_B2ms x1) | ~$0.08/hr |
+| Public IP x4 | ~$0.02/hr |
+| VM (Standard_B1s) | ~$0.01/hr |
+| **合計** | **~$0.93/hr (~$670/月)** |
+
+> **重要**: 使わない時は必ず `terraform destroy` すること。
+
+---
+
+## デプロイ手順
+
+作業ディレクトリは `terraform/` を起点とする。
+
+### 1. terraform.tfvars を設定
+
+```bash
+vi terraform/terraform.tfvars
+```
+
+```hcl
+subscription_id   = "xxx"          # az account show --query id -o tsv
+my_public_ip      = "x.x.x.x/32"  # curl ifconfig.me
+vm_admin_username = "azureuser"
+vm_admin_password = "xxx"
+```
+
+### 2. Terraform でインフラ構築
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+
+# 依存関係グラフを出力（オプション）
+terraform graph | dot -Tpng > dependency_graph.png
+```
+
+### 3. kubectl コンテキスト設定
+
+```bash
+$(terraform output -raw aks_get_credentials_cmd)
+kubectl get nodes
+```
+
+### 4. アプリ用 Namespace を作成
+
+```bash
+kubectl create namespace common-apps
+```
+
+### 5. AGIC を Helm でインストール (各 Namespace に 1 つずつ)
+
+```bash
+# Private Ingress 用 AGIC (agic-private Namespace にデプロイ)
+helm install agic-private \
+  oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+  --version 1.9.1 \
+  --namespace agic-private \
+  --create-namespace \
+  --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+  --set armAuth.identityClientID=$(terraform output -raw agic_private_identity_client_id) \
+  -f ../helm/agic-private/agic-values.yaml
+
+# Public Ingress 用 AGIC (agic-public Namespace にデプロイ)
+helm install agic-public \
+  oci://mcr.microsoft.com/azure-application-gateway/charts/ingress-azure \
+  --version 1.9.1 \
+  --namespace agic-public \
+  --create-namespace \
+  --set appgw.subscriptionId=$(terraform output -raw subscription_id) \
+  --set armAuth.identityClientID=$(terraform output -raw agic_public_identity_client_id) \
+  -f ../helm/agic-public/agic-values.yaml
+```
+
+```bash
+# AGIC Pod 確認 (各 Namespace に 1 Pod が Running であること)
+kubectl get pod -n agic-private -l app=ingress-azure
+kubectl get pod -n agic-public -l app=ingress-azure
+
+# IngressClass 確認 (2 つ存在すること)
+kubectl get ingressclass
+```
+
+### 6. アプリと Ingress をデプロイ
+
+```bash
+# アプリを common-apps にデプロイ (1回でOK)
+kubectl apply -n common-apps -f ../helm/app/echoserver/app.yaml
+
+# Ingress をデプロイ (Namespace は YAML に記載済み)
+kubectl apply -f ../helm/ingress/ingress-private.yaml
+kubectl apply -f ../helm/ingress/ingress-public.yaml
+
+kubectl get ingress -n common-apps -w
+# echoserver-private-ingress: ADDRESS = 10.2.1.10
+# echoserver-public-ingress:  ADDRESS = AppGW の Public IP
+```
+
+### 7. 疎通確認
+
+#### Private Ingress の確認 (VM → Private AppGW)
+
+```bash
+ssh azureuser@$(terraform output -raw test_vm_public_ip)
+
+# VM 内で実行
+curl -s -o /dev/null -w "%{http_code}\n" http://10.2.1.10/ -H "Host: private.internal"
+# → 200
+```
+
+#### Public Ingress の確認 (ローカル PC → Public AppGW)
+
+```bash
+APPGW_PUBLIC_IP=$(terraform output -raw appgw_public_ip)
+curl -s -o /dev/null -w "%{http_code}\n" http://${APPGW_PUBLIC_IP}/ -H "Host: public.example.com"
+# → 200
+```
+
+---
+
+## クリーンアップ
+
+```bash
+terraform destroy
+```
+
+---
+
+## Appendix A: AppGW V2 + AGIC の反映遅延と確認フロー
+
+### 制約: 初回 ARM 更新に最大 10〜15 分かかる
+
+Application Gateway V2 の構成変更は Azure ARM API 経由で反映される。AGIC が Ingress を検知して AppGW 設定を書き換える際、特に **初回** (Terraform の placeholder 構成 → AGIC の実構成) はリスナー・バックエンドプール・ヘルスプローブを一括再構成するため **10〜15 分** かかることがある。
+
+2 回目以降は差分更新となり **15〜30 秒** 程度で完了する。
+
+```
+# 実測値 (本構成)
+1回目: 13:41:50 BEGIN → 13:53:49 完了 (約12分)
+2回目: 13:53:49 BEGIN → 13:54:05 完了 (約15秒)
+```
+
+この間、以下の症状が出るが **正常な過渡状態** である:
+
+| 症状 | 原因 |
+|---|---|
+| `kubectl get ingress` の ADDRESS が空 | AGIC がまだ AppGW に反映完了していない |
+| curl がタイムアウト / ハング | AppGW のリスナーが placeholder のままで実リスナーが未作成 |
+| バックエンドヘルスが空 | バックエンドプールがまだ登録されていない |
+
+### 確認フロー: 変更が反映されなくても問題ないか判断する
+
+デプロイ後、以下を **上から順に** 確認する。全て OK なら問題なし。途中で NG の場合はその段階で待機する。
+
+```
+Step 1: AGIC Pod が Running か
+  │
+  │  kubectl get pods -n agic-private -l app=ingress-azure
+  │  kubectl get pods -n agic-public -l app=ingress-azure
+  │
+  │  NG → Pod ログを確認 (認証エラー / RBAC 不足などの恒久的エラーを疑う)
+  │  OK ↓
+  │
+Step 2: AGIC ログにエラーがないか
+  │
+  │  kubectl logs -n <ns> -l app=ingress-azure --tail=100 | grep -i error
+  │
+  │  ERROR あり → Workload Identity / RBAC / AppGW 名の設定ミスを疑う
+  │  ERROR なし ↓
+  │
+Step 3: AGIC ログで ARM デプロイが完了しているか
+  │
+  │  kubectl logs -n <ns> -l app=ingress-azure --tail=100 | grep -E "Applied generated|NOT changed"
+  │
+  │  "Applied generated Application Gateway configuration" → 初回反映完了
+  │  "Config has NOT changed! No need to connect to ARM." → 2回目以降 (差分なし)
+  │
+  │  どちらも出ていない → ARM 更新中。最大15分待機する
+  │  出ている ↓
+  │
+Step 4: Ingress に ADDRESS が付与されているか
+  │
+  │  kubectl get ingress -n common-apps
+  │
+  │  ADDRESS 空 → Step 3 を再確認
+  │  ADDRESS あり ↓
+  │
+Step 5: AppGW バックエンドヘルスが Healthy か
+  │
+  │  az network application-gateway show-backend-health \
+  │    --resource-group multi-appgw-rg --name <appgw-name> \
+  │    --query 'backendAddressPools[].backendHttpSettingsCollection[].servers[]' \
+  │    -o table
+  │
+  │  結果が空 → ヘルスプローブ実行待ち (30秒間隔 x 3回 = 最大90秒待機)
+  │  Unhealthy → NSG / Pod の起動状態 / ヘルスプローブパスを確認
+  │  Healthy ↓
+  │
+Step 6: 疎通確認
+  │
+  │  # Private (VM から)
+  │  curl -s -o /dev/null -w "%{http_code}\n" http://10.2.1.10/ -H "Host: private.internal"
+  │  # Public (ローカルから)
+  │  curl -s -o /dev/null -w "%{http_code}\n" http://<Public IP>/ -H "Host: public.example.com"
+  │
+  │  200 → 正常完了
+  └──
+```
+
+### まとめ: デプロイ直後に疎通できない場合
+
+1. **まず 15 分待つ** — 初回 ARM 更新の完了を待つのが最優先
+2. **Step 3 のログを確認** — `Applied generated` が出ていれば ARM 更新は完了。出ていなければ待機
+3. **15 分経っても Step 3 が出ない場合** — AGIC の認証エラーや RBAC 不足などの恒久的問題を疑う
+
+---
+
+## Appendix B: AGIC のトラフィック経路 — なぜ別 Namespace のバックエンドに到達できるのか
+
+### AGIC と nginx-ingress の根本的な違い
+
+nginx-ingress のような一般的な Ingress Controller は **クラスタ内の Pod としてトラフィックを中継** する。そのため Kubernetes の Service ネットワーク (ClusterIP) を経由し、別 Namespace の Service を参照するには ExternalName Service 等の仕組みが必要になる。
+
+AGIC はこれとは根本的に異なる。AGIC Pod 自体は **トラフィックを一切中継しない**。AGIC の役割は Azure ARM API を呼び出して AppGW の設定 (リスナー、バックエンドプール、ルーティングルール等) を書き換えることだけであり、実際のトラフィックは **Azure VNet レベルで AppGW → Pod IP に直接** 流れる。
+
+### トラフィック経路の全体像
+
+```
+┌─ Kubernetes クラスタ ─────────────────────────────────────────┐
+│                                                               │
+│  NS: agic-private                                             │
+│    AGIC Pod                                                   │
+│      (1) common-apps の Ingress リソースを Watch               │
+│      (2) common-apps の Endpoints から Pod IP を取得           │
+│      (3) ARM API で AppGW のバックエンドプールに Pod IP を登録  │
+│                                                               │
+│  NS: common-apps                                              │
+│    echoserver Pod (192.168.0.245)  ← (5) AppGW が直接通信     │
+│    echoserver Pod (192.168.0.74)   ← (5) AppGW が直接通信     │
+│    echoserver-svc (ClusterIP)      ← トラフィック経路では不使用 │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+                          │ (3) ARM API
+                          ▼
+                   ┌─────────────┐
+                   │  AppGW      │ ← (4) クライアントからのリクエスト受信
+                   │  (Azure)    │
+                   └──────┬──────┘
+                          │ (5) Azure VNet ルーティング (Pod IP 宛)
+                          ▼
+                   Pod (192.168.0.x)
+```
+
+### 各ステップの詳細
+
+| ステップ | 処理内容 | Namespace の壁 | 備考 |
+|---|---|---|---|
+| (1) Ingress Watch | AGIC が `common-apps` の Ingress を読み取る | `watchNamespace` + RBAC (ClusterRole) で跨げる | Kubernetes API レベルの操作 |
+| (2) Endpoints 取得 | Ingress が参照する Service の Endpoints から Pod IP を取得 | 同上 | Service 自体ではなく Endpoints の IP リストが重要 |
+| (3) ARM API 呼び出し | AppGW のバックエンドプールに Pod IP を直接登録 | **Kubernetes 外** の操作 | Managed Identity で Azure に認証 |
+| (4) リクエスト受信 | クライアント → AppGW (Private IP or Public IP) | — | Azure ネットワーク |
+| (5) バックエンド転送 | AppGW → Pod IP に HTTP 通信 | **Kubernetes ネットワークを経由しない** | Azure VNet + CNI Overlay ルーティング |
+
+### ExternalName Service が不要な理由
+
+| Ingress Controller | トラフィック経路 | 別 NS の Service 参照 |
+|---|---|---|
+| nginx-ingress | クライアント → nginx Pod → **ClusterIP Service** → Pod | ExternalName Service 等が必要 |
+| AGIC | クライアント → **AppGW** → Pod IP に直接通信 | 不要 (ClusterIP を経由しない) |
+
+AGIC にとって Kubernetes の Namespace は **API でリソース (Ingress / Endpoints) を読み取る際のスコープ** でしかなく、実際のトラフィックパスには一切関係しない。そのため AGIC Pod が `agic-private` Namespace にあり、バックエンド Pod が `common-apps` Namespace にあっても、AppGW は Pod IP に直接到達できる。

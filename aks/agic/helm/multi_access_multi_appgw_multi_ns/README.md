@@ -300,6 +300,9 @@ cd terraform
 terraform init
 terraform plan
 terraform apply
+
+# 依存関係グラフを出力（オプション）
+terraform graph | dot -Tpng > dependency_graph.png
 ```
 
 ### 3. kubectl コンテキスト設定
@@ -392,3 +395,93 @@ curl -s -o /dev/null -w "%{http_code}\n" http://${APPGW_PUBLIC_IP}/ -H "Host: pu
 ```bash
 terraform destroy
 ```
+
+---
+
+## Appendix A: AppGW V2 + AGIC の反映遅延と確認フロー
+
+### 制約: 初回 ARM 更新に最大 10〜15 分かかる
+
+Application Gateway V2 の構成変更は Azure ARM API 経由で反映される。AGIC が Ingress を検知して AppGW 設定を書き換える際、特に **初回** (Terraform の placeholder 構成 → AGIC の実構成) はリスナー・バックエンドプール・ヘルスプローブを一括再構成するため **10〜15 分** かかることがある。
+
+2 回目以降は差分更新となり **15〜30 秒** 程度で完了する。
+
+```
+# 実測値 (本構成)
+1回目: 13:41:50 BEGIN → 13:53:49 完了 (約12分)
+2回目: 13:53:49 BEGIN → 13:54:05 完了 (約15秒)
+```
+
+この間、以下の症状が出るが **正常な過渡状態** である:
+
+| 症状 | 原因 |
+|---|---|
+| `kubectl get ingress` の ADDRESS が空 | AGIC がまだ AppGW に反映完了していない |
+| curl がタイムアウト / ハング | AppGW のリスナーが placeholder のままで実リスナーが未作成 |
+| バックエンドヘルスが空 | バックエンドプールがまだ登録されていない |
+
+### 確認フロー: 変更が反映されなくても問題ないか判断する
+
+デプロイ後、以下を **上から順に** 確認する。全て OK なら問題なし。途中で NG の場合はその段階で待機する。
+
+```
+Step 1: AGIC Pod が Running か
+  │
+  │  kubectl get pods -n agic-private -l app=ingress-azure
+  │  kubectl get pods -n agic-public -l app=ingress-azure
+  │
+  │  NG → Pod ログを確認 (認証エラー / RBAC 不足などの恒久的エラーを疑う)
+  │  OK ↓
+  │
+Step 2: AGIC ログにエラーがないか
+  │
+  │  kubectl logs -n <ns> -l app=ingress-azure --tail=100 | grep -i error
+  │
+  │  ERROR あり → Workload Identity / RBAC / AppGW 名の設定ミスを疑う
+  │  ERROR なし ↓
+  │
+Step 3: AGIC ログで ARM デプロイが完了しているか
+  │
+  │  kubectl logs -n <ns> -l app=ingress-azure --tail=100 | grep -E "Applied generated|NOT changed"
+  │
+  │  "Applied generated Application Gateway configuration" → 初回反映完了
+  │  "Config has NOT changed! No need to connect to ARM." → 2回目以降 (差分なし)
+  │
+  │  どちらも出ていない → ARM 更新中。最大15分待機する
+  │  出ている ↓
+  │
+Step 4: Ingress に ADDRESS が付与されているか
+  │
+  │  kubectl get ingress -n app-private
+  │  kubectl get ingress -n app-public
+  │
+  │  ADDRESS 空 → Step 3 を再確認
+  │  ADDRESS あり ↓
+  │
+Step 5: AppGW バックエンドヘルスが Healthy か
+  │
+  │  az network application-gateway show-backend-health \
+  │    --resource-group multi-appgw-rg --name <appgw-name> \
+  │    --query 'backendAddressPools[].backendHttpSettingsCollection[].servers[]' \
+  │    -o table
+  │
+  │  結果が空 → ヘルスプローブ実行待ち (30秒間隔 x 3回 = 最大90秒待機)
+  │  Unhealthy → NSG / Pod の起動状態 / ヘルスプローブパスを確認
+  │  Healthy ↓
+  │
+Step 6: 疎通確認
+  │
+  │  # Private (VM から)
+  │  curl -s -o /dev/null -w "%{http_code}\n" http://10.2.1.10/ -H "Host: private.internal"
+  │  # Public (ローカルから)
+  │  curl -s -o /dev/null -w "%{http_code}\n" http://<Public IP>/ -H "Host: public.example.com"
+  │
+  │  200 → 正常完了
+  └──
+```
+
+### まとめ: デプロイ直後に疎通できない場合
+
+1. **まず 15 分待つ** — 初回 ARM 更新の完了を待つのが最優先
+2. **Step 3 のログを確認** — `Applied generated` が出ていれば ARM 更新は完了。出ていなければ待機
+3. **15 分経っても Step 3 が出ない場合** — AGIC の認証エラーや RBAC 不足などの恒久的問題を疑う
